@@ -24,6 +24,18 @@ use crate::global;
 use crate::pow::Difficulty;
 use std::cmp::{max, min};
 
+// core/src/consensus.rs
+use crate::core::pow::Proof; // RandomXProof
+
+pub fn validate_block(block: &Block) -> Result<(), Error> {
+	// ... existing checks
+	let header = &block.header;
+	header.pow().verify(header)?; // Now uses dyn ProofOfWork
+							   // Adjust difficulty adjustment for RandomX (reuse existing, but tune BLOCK_TIME_SEC if needed)
+							   // ...
+	Ok(())
+}
+
 /// A grin is divisible to 10^9, following the SI prefixes
 pub const GRIN_BASE: u64 = 1_000_000_000;
 /// Milligrin, a thousand of a grin

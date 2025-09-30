@@ -17,16 +17,17 @@
 use crate::consensus::{self, reward, REWARD};
 use crate::core::committed::{self, Committed};
 use crate::core::compact_block::CompactBlock;
+use crate::core::hash::Hash;
 use crate::core::hash::{DefaultHashable, Hash, Hashed, ZERO_HASH};
 use crate::core::{
 	pmmr, transaction, Commitment, Inputs, KernelFeatures, Output, Transaction, TransactionBody,
 	TxKernel, Weighting,
 };
 use crate::global;
-use crate::pow::{verify_size, Difficulty, Proof, ProofOfWork};
-use crate::ser::{
-	self, deserialize_default, serialize_default, PMMRable, Readable, Reader, Writeable, Writer,
-};
+use crate::pow::{get_pow_type, PowType, ProofOfWork}; // Note: ProofOfWork trait
+use crate::ser::{Error as SerError, ProtocolVersion, Writer}; // For serialization
+use std::io;
+
 use chrono::prelude::{DateTime, Utc};
 use chrono::Duration;
 use keychain::{self, BlindingFactor};
@@ -195,7 +196,7 @@ impl Readable for HeaderVersion {
 }
 
 /// Block header, fairly standard compared to other blockchains.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BlockHeader {
 	/// Version of the block
 	pub version: HeaderVersion,
@@ -223,6 +224,8 @@ pub struct BlockHeader {
 	pub kernel_mmr_size: u64,
 	/// Proof of work and related
 	pub pow: ProofOfWork,
+	pub nonce: u64,                // (for mining iteration)
+	pub pow: Box<dyn ProofOfWork>, // Keep as dyn trait object
 }
 impl DefaultHashable for BlockHeader {}
 
@@ -246,6 +249,51 @@ impl Default for BlockHeader {
 			pow: ProofOfWork::default(),
 		}
 	}
+}
+
+impl BlockHeader {
+	// Add/update pow_type
+	pub fn pow_type(&self) -> Result<PowType, PowError> {
+		get_pow_type(self)
+	}
+
+	// Add/update pow
+	pub fn pow(&self) -> &dyn ProofOfWork {
+		&*self.pow
+	}
+
+	// Add hash_without_nonce for RandomX seed
+	pub fn hash_without_nonce(&self) -> Result<Hash, SerError> {
+		let mut bytes = vec![];
+		let mut writer = io::Cursor::new(&mut bytes);
+		// Write non-nonce/PoW fields (adapt to exact order in struct)
+		self.version
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.height
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.prev_hash
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.prev_root
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.timestamp
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.output_root
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.range_proof_root
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.kernel_root
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.total_kernel_offset
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.output_mmr_size
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		self.kernel_mmr_size
+			.write(&mut Writer::new(&mut writer, ProtocolVersion::V2))?;
+		// Skip nonce and pow
+		Ok(Hash::from_vec(&bytes))
+	}
+
+	// Existing hash() unchanged (includes all fields)
 }
 
 impl PMMRable for BlockHeader {
@@ -274,6 +322,7 @@ impl Writeable for BlockHeader {
 		if !writer.serialization_mode().is_hash_mode() {
 			self.write_pre_pow(writer)?;
 		}
+		self.nonce.write(writer)?; // Add if new field
 		self.pow.write(writer)?;
 		Ok(())
 	}

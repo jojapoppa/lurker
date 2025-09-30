@@ -16,8 +16,7 @@
 //! verification to avoid DoS attacks and difficulty for block verifiers to
 //! build new blocks. In addition, mining new blocks should also be as
 //! difficult on high end custom-made hardware (ASICs) as on commodity hardware
-//! or smartphones. For this reason we use Cuckoo Cycle (see the cuckoo
-//! module for more information).
+//! or smartphones. For this reason we use RandomX (as it is also Quantum Resistant as well)
 //!
 //! Note that this miner implementation is here mostly for tests and
 //! reference. It's not optimized for speed.
@@ -30,28 +29,39 @@
 
 pub use self::common::EdgeType;
 pub use self::types::*;
-use crate::core::{Block, BlockHeader};
 use crate::genesis;
 use crate::global;
 
+use crate::core::block::BlockHeader; // For trait param
+use crate::core::ser::{Readable, Writeable}; // For trait bounds
+
+// Add RandomX mod and use
+pub mod randomx;
+pub use randomx::RandomXProofOfWork; // Rename to match trait: ProofOfWork
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PowType {
+	#[serde(rename = "RandomX")]
+	RandomX,
+}
+
+pub trait ProofOfWork: Readable + Writeable {
+	fn size(&self) -> usize;
+	fn verify(&self, header: &BlockHeader) -> Result<(), PowError>; // Note: &BlockHeader
+}
+
+pub fn get_pow_type(_header: &BlockHeader) -> Result<PowType, PowError> {
+	Ok(PowType::RandomX)
+}
+
 #[macro_use]
 mod common;
-pub mod cuckaroo;
-pub mod cuckarood;
-pub mod cuckaroom;
-pub mod cuckarooz;
-pub mod cuckatoo;
 mod error;
 #[allow(dead_code)]
 pub mod lean;
 mod siphash;
 mod types;
 
-pub use crate::pow::cuckaroo::{new_cuckaroo_ctx, no_cuckaroo_ctx, CuckarooContext};
-pub use crate::pow::cuckarood::{new_cuckarood_ctx, CuckaroodContext};
-pub use crate::pow::cuckaroom::{new_cuckaroom_ctx, CuckaroomContext};
-pub use crate::pow::cuckarooz::{new_cuckarooz_ctx, CuckaroozContext};
-pub use crate::pow::cuckatoo::{new_cuckatoo_ctx, CuckatooContext};
 pub use crate::pow::error::Error;
 use chrono::prelude::{DateTime, Utc};
 

@@ -39,3 +39,42 @@ pub mod global;
 pub mod libtx;
 pub mod pow;
 pub mod ser;
+
+// mining/src/lib.rs
+use crate::core::block::Header;
+use crate::core::pow::Proof;
+use randomx_rs::{RandomXCache, RandomXFlag, RandomXVM};
+
+pub fn mine_header(header: &mut Header, difficulty: Difficulty) -> Option<u64> {
+	let flags = RandomXFlag::FLAG_DEFAULT | RandomXFlag::FLAG_FULL_MEM;
+	let pre_hash = header.hash_without_nonce().unwrap();
+	let key = pre_hash.as_bytes();
+
+	if let Ok(cache) = RandomXCache::new(flags, key) {
+		if let Ok(mut vm) = RandomXVM::new(flags, Some(&cache)) {
+			let mut nonce: u64 = 0;
+			loop {
+				header.nonce = nonce;
+				let mut header_bytes = Vec::new();
+				// Serialize header for input
+				// Assume header.write(&mut Writer::new(&mut header_bytes, ProtocolVersion::default()))
+				if let Ok(_) = header.write(&mut ser::Writer::new(
+					&mut header_bytes,
+					ser::ProtocolVersion::default(),
+				)) {
+					let input = &header_bytes[..];
+					if let Ok(output) = vm.calculate(input) {
+						let pow_hash = Hash::from_vec(&output.to_vec());
+						if pow_hash.to_difficulty() >= difficulty {
+							header.pow = Proof::new(nonce); // Set proof
+							return Some(nonce);
+						}
+					}
+				}
+				nonce += 1;
+				if nonce % 10000 == 0 { /* Yield or log */ }
+			}
+		}
+	}
+	None
+}

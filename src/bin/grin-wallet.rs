@@ -31,6 +31,12 @@ use std::path::PathBuf;
 
 use grin_wallet::cmd;
 
+// In mining loop
+let mut header = create_header(...);
+if let Some(nonce) = mine_header(&mut header, current_difficulty) {
+	// Build block, broadcast
+}
+
 // include build information
 pub mod built_info {
 	include!(concat!(env!("OUT_DIR"), "/built.rs"));
