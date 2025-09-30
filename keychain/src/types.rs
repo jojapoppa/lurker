@@ -27,11 +27,11 @@ use crate::blake2::blake2b::blake2b;
 use crate::extkey_bip32::{self, ChildNumber};
 use serde::{de, ser}; //TODO: Convert errors to use ErrorKind
 
-use crate::util::secp::constants::SECRET_KEY_SIZE;
-use crate::util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
-use crate::util::secp::pedersen::Commitment;
-use crate::util::secp::{self, Message, Secp256k1, Signature};
-use crate::util::ToHex;
+use crate::grin_wallet_util::secp::constants::SECRET_KEY_SIZE;
+use crate::grin_wallet_util::secp::key::{PublicKey, SecretKey, ZERO_KEY};
+use crate::grin_wallet_util::secp::pedersen::Commitment;
+use crate::grin_wallet_util::secp::{self, Message, Secp256k1, Signature};
+use crate::grin_wallet_util::ToHex;
 use zeroize::Zeroize;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -190,7 +190,7 @@ impl Identifier {
 	}
 
 	pub fn from_hex(hex: &str) -> Result<Identifier, Error> {
-		let bytes = util::from_hex(hex).unwrap();
+		let bytes = grin_wallet_util::from_hex(hex).unwrap();
 		Ok(Identifier::from_bytes(&bytes))
 	}
 
@@ -266,7 +266,7 @@ impl BlindingFactor {
 	}
 
 	pub fn from_hex(hex: &str) -> Result<BlindingFactor, Error> {
-		let bytes = util::from_hex(hex).unwrap();
+		let bytes = grin_wallet_util::from_hex(hex).unwrap();
 		Ok(BlindingFactor::from_slice(&bytes))
 	}
 
@@ -512,10 +512,10 @@ impl From<SwitchCommitmentType> for u8 {
 mod test {
 	use rand::thread_rng;
 
+	use crate::grin_wallet_util::secp::constants::SECRET_KEY_SIZE;
+	use crate::grin_wallet_util::secp::key::{SecretKey, ZERO_KEY};
+	use crate::grin_wallet_util::secp::Secp256k1;
 	use crate::types::{BlindingFactor, ExtKeychainPath, Identifier};
-	use crate::util::secp::constants::SECRET_KEY_SIZE;
-	use crate::util::secp::key::{SecretKey, ZERO_KEY};
-	use crate::util::secp::Secp256k1;
 	use std::slice::from_raw_parts;
 
 	// This tests cleaning of BlindingFactor (e.g. secret key) on Drop.

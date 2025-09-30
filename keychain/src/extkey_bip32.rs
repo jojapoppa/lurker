@@ -35,9 +35,9 @@ use std::io::Cursor;
 use std::str::FromStr;
 use std::{error, fmt};
 
+use crate::grin_util::secp::key::{PublicKey, SecretKey};
+use crate::grin_util::secp::{self, ContextFlag, Secp256k1};
 use crate::mnemonic;
-use crate::util::secp::key::{PublicKey, SecretKey};
-use crate::util::secp::{self, ContextFlag, Secp256k1};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 
 use digest::generic_array::GenericArray;
@@ -641,8 +641,8 @@ mod tests {
 	use std::str::FromStr;
 	use std::string::ToString;
 
-	use crate::util::from_hex;
-	use crate::util::secp::Secp256k1;
+	use crate::grin_util::from_hex;
+	use crate::grin_util::secp::Secp256k1;
 
 	use super::*;
 
