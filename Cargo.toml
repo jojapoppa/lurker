@@ -18,10 +18,9 @@ path = "src/bin/grin-wallet.rs"
 [dependencies]
 yggdrasilctl = { git = "https://github.com/jojapoppa/yggdrasilctl.git", branch = "main", default-features = false, features = ["use_tokio"] }
 yggdrasil-keys = "0.4.0"
-randomx-rs = "0.3.0"  # Latest as of 2025; check crates.io
+randomx-rs = "1.4.1"  # Latest as of 2025
 grin_core = { path = "./core" }  # Drops version; uses local path
 grin_chain = { path = "./chain" }  # Drops version; uses local path
-grin_etc = { path = "./etc" }  # Drops version; uses local path
 grin_keychain= { path = "./keychain" }  # Drops version; uses local path
 grin_p2p = { path = "./p2p" }  # Drops version; uses local path
 grin_pool = { path = "./pool" }  # Drops version; uses local path
@@ -43,35 +42,6 @@ grin_wallet_libwallet = { path = "../lurker-wallet/libwallet", version = "5.4.0-
 grin_wallet_controller = { path = "../lurker-wallet/controller", version = "5.4.0-alpha.1" }
 grin_wallet_config = { path = "../lurker-wallet/config", version = "5.4.0-alpha.1" }
 grin_wallet_util = { path = "../lurker-wallet/util", version = "5.4.0-alpha.1" }
-
-##### Grin Imports
-
-# For Release
-grin_core = "5.3.3"
-grin_keychain = "5.3.3"
-grin_util = "5.3.3"
-grin_api = "5.3.3"
-
-# For beta release
-
-# grin_core = { git = "https://github.com/mimblewimble/grin", tag = "v5.2.0-beta.3"}
-# grin_keychain = { git = "https://github.com/mimblewimble/grin", tag = "v5.2.0-beta.3" }
-# grin_util = { git = "https://github.com/mimblewimble/grin", tag = "v5.2.0-beta.3" }
-# grin_api = { git = "https://github.com/mimblewimble/grin", tag = "v5.2.0-beta.3" }
-
-# For bleeding edge
-# grin_core = { git = "https://github.com/mimblewimble/grin", branch = "master" }
-# grin_keychain = { git = "https://github.com/mimblewimble/grin", branch = "master" }
-# grin_util = { git = "https://github.com/mimblewimble/grin", branch = "master" }
-# grin_api = { git = "https://github.com/mimblewimble/grin", branch = "master" }
-
-# For local testing
-# grin_core = { path = "../grin/core"}
-# grin_keychain = { path = "../grin/keychain"}
-# grin_util = { path = "../grin/util"}
-# grin_api = { path = "../grin/api"}
-
-###### 
 
 [features]
 default = []

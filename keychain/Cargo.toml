@@ -26,4 +26,4 @@ ripemd160 = "0.9"
 sha2 = "0.9"
 pbkdf2 = "0.8"
 
-grin_util = { path = "../util", version = "5.4.0-alpha.0" }
+grin_wallet_util = { path = "../../lurker-wallet/util", version = "5.4.0-alpha.0" }

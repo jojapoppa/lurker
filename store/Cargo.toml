@@ -22,7 +22,7 @@ thiserror = "1"
 log = "0.4"
 
 grin_core = { path = "../core", version = "5.4.0-alpha.0" }
-grin_util = { path = "../util", version = "5.4.0-alpha.0" }
+grin_wallet_util = { path = "../../lurker-wallet/util", version = "5.4.0-alpha.0" }
 
 [dev-dependencies]
 chrono = "0.4.11"
