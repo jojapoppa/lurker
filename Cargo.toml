@@ -18,6 +18,7 @@ path = "src/bin/grin-wallet.rs"
 [dependencies]
 yggdrasilctl = { git = "https://github.com/jojapoppa/yggdrasilctl.git", branch = "main", default-features = false, features = ["use_tokio"] }
 yggdrasil-keys = "0.4.0"
+randomx-rs = "0.3.0"  # Latest as of 2025; check crates.io
 clap = { version = "2.33", features = ["yaml"] }
 rpassword = "4.0"
 thiserror = "1"
@@ -63,6 +64,10 @@ grin_api = "5.3.3"
 # grin_api = { path = "../grin/api"}
 
 ###### 
+
+[features]
+default = []
+randomx = []  # Optional feature flag for backward compat
 
 [build-dependencies]
 built = { version = "0.7", features = ["git2"]}
