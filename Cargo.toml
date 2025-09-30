@@ -25,6 +25,7 @@ grin_etc = { path = "./etc" }  # Drops version; uses local path
 grin_keychain= { path = "./keychain" }  # Drops version; uses local path
 grin_p2p = { path = "./p2p" }  # Drops version; uses local path
 grin_pool = { path = "./pool" }  # Drops version; uses local path
+grin_servers = { path = "./servers" }  # Drops version; uses local path
 clap = { version = "2.33", features = ["yaml"] }
 rpassword = "4.0"
 thiserror = "1"
