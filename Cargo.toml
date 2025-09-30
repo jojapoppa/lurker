@@ -20,6 +20,7 @@ yggdrasilctl = { git = "https://github.com/jojapoppa/yggdrasilctl.git", branch =
 yggdrasil-keys = "0.4.0"
 randomx-rs = "0.3.0"  # Latest as of 2025; check crates.io
 grin_core = { path = "./core" }  # Drops version; uses local path
+grin_chain = { path = "./chain" }  # Drops version; uses local path
 clap = { version = "2.33", features = ["yaml"] }
 rpassword = "4.0"
 thiserror = "1"
