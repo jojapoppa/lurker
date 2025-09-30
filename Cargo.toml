@@ -22,6 +22,7 @@ randomx-rs = "0.3.0"  # Latest as of 2025; check crates.io
 grin_core = { path = "./core" }  # Drops version; uses local path
 grin_chain = { path = "./chain" }  # Drops version; uses local path
 grin_etc = { path = "./etc" }  # Drops version; uses local path
+grin_keychain= { path = "./keychain" }  # Drops version; uses local path
 clap = { version = "2.33", features = ["yaml"] }
 rpassword = "4.0"
 thiserror = "1"
