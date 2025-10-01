@@ -14,10 +14,10 @@
 
 //! The Committed trait and associated errors.
 
+use grin_util::secp::key::SecretKey;
+use grin_util::secp::pedersen::Commitment;
+use grin_util::{secp, secp_static, static_secp_instance};
 use keychain::BlindingFactor;
-use util::secp::key::SecretKey;
-use util::secp::pedersen::Commitment;
-use util::{secp, secp_static, static_secp_instance};
 
 /// Errors from summing and verifying kernel excesses via committed trait.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]

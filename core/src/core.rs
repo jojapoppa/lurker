@@ -25,7 +25,7 @@ pub mod pmmr;
 pub mod transaction;
 
 use crate::consensus::GRIN_BASE;
-use util::secp::pedersen::Commitment;
+use grin_util::secp::pedersen::Commitment;
 
 pub use self::block::*;
 pub use self::block_sums::*;

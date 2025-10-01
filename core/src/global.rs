@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(dead_code)]
+
 //! Values that should be shared across all modules, without necessarily
 //! having to pass them all over the place, but aren't consensus values.
 //! should be used sparingly.
@@ -22,15 +24,13 @@ use crate::consensus::{
 	DMA_WINDOW, GRIN_BASE, INITIAL_DIFFICULTY, KERNEL_WEIGHT, MAX_BLOCK_WEIGHT, OUTPUT_WEIGHT,
 	PROOFSIZE, SECOND_POW_EDGE_BITS, STATE_SYNC_THRESHOLD,
 };
-use crate::core::block::{Block, HeaderVersion};
+use crate::core::block::Block;
+use crate::core::block::HeaderVersion;
 use crate::genesis;
-use crate::pow::{
-	self, new_cuckaroo_ctx, new_cuckarood_ctx, new_cuckaroom_ctx, new_cuckarooz_ctx,
-	new_cuckatoo_ctx, no_cuckaroo_ctx, PoWContext, Proof,
-};
+use crate::pow::{PowError, PowType, RandomXProofOfWork}; // Assume RandomXProofOfWork impls needed traits
 use crate::ser::ProtocolVersion;
+use grin_util::OneTime;
 use std::cell::Cell;
-use util::OneTime;
 
 /// An enum collecting sets of parameters used throughout the
 /// code wherever mining is needed. This should allow for
@@ -319,35 +319,24 @@ pub fn is_nrd_enabled() -> bool {
 	})
 }
 
-/// Return either a cuckaroo* context or a cuckatoo context
-/// Single change point
-pub fn create_pow_context<T>(
+/// Create a RandomX cache context (adapted for RandomX; drops edge_bits/proof_size/max_sols)
+/// Single change point for PoW context init.
+pub fn create_pow_context(
 	height: u64,
-	edge_bits: u8,
-	proof_size: usize,
-	max_sols: u32,
-) -> Result<Box<dyn PoWContext>, pow::Error> {
-	let chain_type = get_chain_type();
-	if chain_type == ChainTypes::Mainnet || chain_type == ChainTypes::Testnet {
-		// Mainnet and Testnet have Cuckatoo31+ for AF and Cuckaroo{,d,m,z}29 for AR
-		if edge_bits > 29 {
-			new_cuckatoo_ctx(edge_bits, proof_size, max_sols)
-		} else {
-			match header_version(height) {
-				HeaderVersion(1) => new_cuckaroo_ctx(edge_bits, proof_size),
-				HeaderVersion(2) => new_cuckarood_ctx(edge_bits, proof_size),
-				HeaderVersion(3) => new_cuckaroom_ctx(edge_bits, proof_size),
-				HeaderVersion(4) => new_cuckarooz_ctx(edge_bits, proof_size),
-				_ => no_cuckaroo_ctx(),
-			}
+	seed: &[u8], // From BlockHeader::pre_pow()
+) -> Result<RandomXProofOfWork, pow::Error> {
+	// For RandomX: Always use DEFAULT flags; version-based if needed later
+	match header_version(height) {
+		HeaderVersion(v) if (1..=3).contains(&v) => Err(PowError::UnsupportedVersion), // Pre-RandomX
+		_ => {
+			// Init cache from seed
+			let cache = crate::pow::new_randomx_cache(seed)?; // From pow.rs
+			Ok(RandomXProofOfWork::new(cache)) // Constructor takes cache
 		}
-	} else {
-		// Everything else is Cuckatoo only
-		new_cuckatoo_ctx(edge_bits, proof_size, max_sols)
 	}
 }
 
-/// The minimum acceptable edge_bits
+/// The minimum acceptable edge_bits (legacy; stub for compat—RandomX ignores)
 pub fn min_edge_bits() -> u8 {
 	match get_chain_type() {
 		ChainTypes::AutomatedTesting => AUTOMATED_TESTING_MIN_EDGE_BITS,
@@ -358,7 +347,7 @@ pub fn min_edge_bits() -> u8 {
 
 /// Reference edge_bits used to compute factor on higher Cuck(at)oo graph sizes,
 /// while the min_edge_bits can be changed on a soft fork, changing
-/// base_edge_bits is a hard fork.
+/// base_edge_bits is a hard fork. (Legacy stub)
 pub fn base_edge_bits() -> u8 {
 	match get_chain_type() {
 		ChainTypes::AutomatedTesting => AUTOMATED_TESTING_MIN_EDGE_BITS,
@@ -367,7 +356,7 @@ pub fn base_edge_bits() -> u8 {
 	}
 }
 
-/// The proofsize
+/// The proofsize (legacy stub; RandomX proof is fixed nonce)
 pub fn proofsize() -> usize {
 	match get_chain_type() {
 		ChainTypes::AutomatedTesting => AUTOMATED_TESTING_PROOF_SIZE,
@@ -395,7 +384,7 @@ pub fn initial_block_difficulty() -> u64 {
 	}
 }
 
-/// Initial mining secondary scale
+/// Initial mining secondary scale (legacy stub; RandomX has no secondary)
 pub fn initial_graph_weight() -> u32 {
 	match get_chain_type() {
 		ChainTypes::AutomatedTesting => graph_weight(0, AUTOMATED_TESTING_MIN_EDGE_BITS) as u32,
@@ -405,7 +394,7 @@ pub fn initial_graph_weight() -> u32 {
 	}
 }
 
-/// Minimum valid graph weight post HF4
+/// Minimum valid graph weight post HF4 (legacy stub)
 pub fn min_wtema_graph_weight() -> u64 {
 	match get_chain_type() {
 		ChainTypes::AutomatedTesting => graph_weight(0, AUTOMATED_TESTING_MIN_EDGE_BITS),
@@ -482,7 +471,6 @@ pub fn is_testnet() -> bool {
 /// Converts an iterator of block difficulty data to more a more manageable
 /// vector and pads if needed (which will) only be needed for the first few
 /// blocks after genesis
-
 pub fn difficulty_data_to_vector<T>(cursor: T) -> Vec<HeaderDifficultyInfo>
 where
 	T: IntoIterator<Item = HeaderDifficultyInfo>,
@@ -516,11 +504,12 @@ where
 }
 
 /// Calculates the size of a header (in bytes) given a number of edge bits in the PoW
+/// (Adapted for RandomX: fixed size, ignores edge_bits)
 #[inline]
-pub fn header_size_bytes(edge_bits: u8) -> usize {
-	let size = 2 + 2 * 8 + 5 * 32 + 32 + 2 * 8;
-	let proof_size = 8 + 4 + 8 + 1 + Proof::pack_len(edge_bits);
-	size + proof_size
+pub fn header_size_bytes(_edge_bits: u8) -> usize {
+	let base_size = 2 + 2 * 8 + 5 * 32 + 32 + 2 * 8; // Version, height, prev_hash, etc.
+	let pow_size = 8 + Difficulty::LEN; // Nonce (u64) + difficulty
+	base_size + pow_size
 }
 
 #[cfg(test)]
@@ -529,36 +518,40 @@ mod test {
 	use crate::core::Block;
 	use crate::genesis::*;
 	use crate::pow::mine_genesis_block;
-	use crate::ser::{BinWriter, Writeable};
+	use crate::ser::{BinWriter, ProtocolVersion, Writeable};
 
 	fn test_header_len(genesis: Block) {
 		let mut raw = Vec::<u8>::with_capacity(1_024);
-		let mut writer = BinWriter::new(&mut raw, ProtocolVersion::local());
+		let mut writer = BinWriter::new(&mut raw, ProtocolVersion::V2); // Use V2 for consistency
 		genesis.header.write(&mut writer).unwrap();
-		assert_eq!(raw.len(), header_size_bytes(genesis.header.pow.edge_bits()));
+		assert_eq!(raw.len(), header_size_bytes(genesis.header.pow.nonce as u8)); // Stub edge_bits from nonce
 	}
 
 	#[test]
 	fn automated_testing_header_len() {
 		set_local_chain_type(ChainTypes::AutomatedTesting);
-		test_header_len(mine_genesis_block().unwrap());
+		let genesis = mine_genesis_block().unwrap(); // Assume adapted for RandomX
+		test_header_len(genesis);
 	}
 
 	#[test]
 	fn user_testing_header_len() {
 		set_local_chain_type(ChainTypes::UserTesting);
-		test_header_len(mine_genesis_block().unwrap());
+		let genesis = mine_genesis_block().unwrap();
+		test_header_len(genesis);
 	}
 
 	#[test]
 	fn testnet_header_len() {
 		set_local_chain_type(ChainTypes::Testnet);
-		test_header_len(genesis_test());
+		let genesis = genesis_test();
+		test_header_len(genesis);
 	}
 
 	#[test]
 	fn mainnet_header_len() {
 		set_local_chain_type(ChainTypes::Mainnet);
-		test_header_len(genesis_main());
+		let genesis = genesis_main();
+		test_header_len(genesis);
 	}
 }

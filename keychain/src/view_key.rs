@@ -20,11 +20,11 @@ use super::extkey_bip32::{
 	Fingerprint,
 };
 use super::types::{Error, Keychain};
-use crate::util::secp::constants::GENERATOR_PUB_J_RAW;
-use crate::util::secp::ffi;
-use crate::util::secp::key::{PublicKey, SecretKey};
-use crate::util::secp::Secp256k1;
 use crate::SwitchCommitmentType;
+use grin_util::secp::constants::GENERATOR_PUB_J_RAW;
+use grin_util::secp::ffi;
+use grin_util::secp::key::{PublicKey, SecretKey};
+use grin_util::secp::Secp256k1;
 
 /*const VERSION_TEST_NS: [u8;4] = [0x03, 0x27, 0x3E, 0x4B];
 const VERSION_TEST: [u8;4]    = [0x03, 0x27, 0x3E, 0x4B];

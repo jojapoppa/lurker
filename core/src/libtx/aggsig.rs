@@ -17,10 +17,10 @@
 //! [Rust Aggsig library](https://github.com/mimblewimble/rust-secp256k1-zkp/blob/master/src/aggsig.rs)
 
 use crate::libtx::error::Error;
+use grin_util::secp::key::{PublicKey, SecretKey};
+use grin_util::secp::pedersen::Commitment;
+use grin_util::secp::{self, aggsig, Message, Secp256k1, Signature};
 use keychain::{BlindingFactor, Identifier, Keychain, SwitchCommitmentType};
-use util::secp::key::{PublicKey, SecretKey};
-use util::secp::pedersen::Commitment;
-use util::secp::{self, aggsig, Message, Secp256k1, Signature};
 
 /// Creates a new secure nonce (as a SecretKey), guaranteed to be usable during
 /// aggsig creation.
@@ -34,7 +34,7 @@ use util::secp::{self, aggsig, Message, Secp256k1, Signature};
 /// ```
 /// # extern crate grin_core as core;
 /// use core::libtx::aggsig;
-/// use util::secp::{ContextFlag, Secp256k1};
+/// use grin_util::secp::{ContextFlag, Secp256k1};
 /// let secp = Secp256k1::with_caps(ContextFlag::SignOnly);
 /// let secret_nonce = aggsig::create_secnonce(&secp).unwrap();
 /// ```
@@ -69,8 +69,8 @@ pub fn create_secnonce(secp: &Secp256k1) -> Result<SecretKey, Error> {
 /// # extern crate rand;
 /// use rand::thread_rng;
 /// use core::libtx::aggsig;
-/// use util::secp::key::{PublicKey, SecretKey};
-/// use util::secp::{ContextFlag, Secp256k1, Message};
+/// use grin_util::secp::key::{PublicKey, SecretKey};
+/// use grin_util::secp::{ContextFlag, Secp256k1, Message};
 ///
 /// let secp = Secp256k1::with_caps(ContextFlag::SignOnly);
 /// let secret_nonce = aggsig::create_secnonce(&secp).unwrap();
@@ -139,8 +139,8 @@ pub fn calculate_partial_sig(
 /// # extern crate rand;
 /// use rand::thread_rng;
 /// use core::libtx::aggsig;
-/// use util::secp::key::{PublicKey, SecretKey};
-/// use util::secp::{ContextFlag, Secp256k1, Message};
+/// use grin_util::secp::key::{PublicKey, SecretKey};
+/// use grin_util::secp::{ContextFlag, Secp256k1, Message};
 ///
 /// let secp = Secp256k1::with_caps(ContextFlag::Full);
 /// let secret_nonce = aggsig::create_secnonce(&secp).unwrap();
@@ -219,8 +219,8 @@ pub fn verify_partial_sig(
 /// ```
 /// # extern crate grin_core as core;
 /// use core::consensus::reward;
-/// use util::secp::key::{PublicKey, SecretKey};
-/// use util::secp::{ContextFlag, Secp256k1};
+/// use grin_util::secp::key::{PublicKey, SecretKey};
+/// use grin_util::secp::{ContextFlag, Secp256k1};
 /// use core::libtx::{aggsig, proof};
 /// use core::core::transaction::KernelFeatures;
 /// use core::core::{Output, OutputFeatures};
@@ -283,8 +283,8 @@ where
 /// # extern crate grin_core as core;
 /// use core::consensus::reward;
 /// use core::libtx::{aggsig, proof};
-/// use util::secp::key::{PublicKey, SecretKey};
-/// use util::secp::{ContextFlag, Secp256k1};
+/// use grin_util::secp::key::{PublicKey, SecretKey};
+/// use grin_util::secp::{ContextFlag, Secp256k1};
 /// use core::core::transaction::KernelFeatures;
 /// use core::core::{Output, OutputFeatures};
 /// use keychain::{Keychain, ExtKeychain, SwitchCommitmentType};
@@ -352,8 +352,8 @@ pub fn verify_single_from_commit(
 /// # extern crate rand;
 /// use rand::thread_rng;
 /// use core::libtx::aggsig;
-/// use util::secp::key::{PublicKey, SecretKey};
-/// use util::secp::{ContextFlag, Secp256k1, Message};
+/// use grin_util::secp::key::{PublicKey, SecretKey};
+/// use grin_util::secp::{ContextFlag, Secp256k1, Message};
 ///
 /// let secp = Secp256k1::with_caps(ContextFlag::Full);
 /// let secret_nonce = aggsig::create_secnonce(&secp).unwrap();

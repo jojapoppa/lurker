@@ -13,26 +13,48 @@
 
 //! All the rules required for a cryptocurrency to have reach consensus across
 //! the whole network are complex and hard to completely isolate. Some can be
-//! simple parameters (like block reward), others complex algorithms (like
-//! Merkle sum trees or reorg rules). However, as long as they're simple
+// simple parameters (like block reward), others complex algorithms (like
+// Merkle sum trees or reorg rules). However, as long as they're simple
 //! enough, consensus-relevant constants and short functions should be kept
 //! here.
 
-use crate::core::block::HeaderVersion;
+use crate::core::block::{Block, HeaderVersion};
 use crate::core::hash::Hash;
 use crate::global;
-use crate::pow::Difficulty;
+use crate::pow::{PowError, RandomXProofOfWork};
+use crate::ser::{Readable, Reader, Writeable, Writer};
+use serde::{Deserialize, Serialize};
 use std::cmp::{max, min};
 
-// core/src/consensus.rs
-use crate::core::pow::Proof; // RandomXProof
+/// Errors specific to consensus rules
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+	/// Difficulty is invalid
+	#[error("Invalid difficulty")]
+	InvalidDifficulty,
+	/// Header version is invalid
+	#[error("Invalid header version")]
+	InvalidHeaderVersion,
+	/// PoW verification failed
+	#[error("PoW verification failed: {0}")]
+	PowVerification(PowError),
+	// Add more as needed
+}
 
+impl From<PowError> for Error {
+	fn from(e: PowError) -> Self {
+		Error::PowVerification(e)
+	}
+}
+
+/// Validates a block against consensus rules (RandomX PoW, difficulty, version)
 pub fn validate_block(block: &Block) -> Result<(), Error> {
-	// ... existing checks
 	let header = &block.header;
-	header.pow().verify(header)?; // Now uses dyn ProofOfWork
-							   // Adjust difficulty adjustment for RandomX (reuse existing, but tune BLOCK_TIME_SEC if needed)
-							   // ...
+	if !valid_header_version(header.height, header.version) {
+		return Err(Error::InvalidHeaderVersion);
+	}
+	header.pow.verify(header).map_err(Into::into)?;
+	// Add more checks as needed (e.g., reward sum, kernel sums, etc.)
 	Ok(())
 }
 
@@ -47,7 +69,7 @@ pub const NANO_GRIN: u64 = 1;
 
 /// Block interval, in seconds, the network will tune its next_target for. Note
 /// that we may reduce this value in the future as we get more data on mining
-/// with Cuckoo Cycle, networks improve and block propagation is optimized
+/// with RandomX, networks improve and block propagation is optimized
 /// (adjusting the reward accordingly).
 pub const BLOCK_TIME_SEC: u64 = 60;
 
@@ -77,22 +99,23 @@ pub const COINBASE_MATURITY: u64 = DAY_HEIGHT;
 /// Target ratio of secondary proof of work to primary proof of work,
 /// as a function of block height (time). Starts at 90% losing a percent
 /// approximately every week. Represented as an integer between 0 and 100.
-pub fn secondary_pow_ratio(height: u64) -> u64 {
-	90u64.saturating_sub(height / (2 * YEAR_HEIGHT / 90))
+/// (Stubbed for RandomX: No secondary PoW)
+pub fn secondary_pow_ratio(_height: u64) -> u64 {
+	0 // RandomX has no secondary PoW
 }
 
-/// Cuckoo-cycle proof size (cycle length)
-pub const PROOFSIZE: usize = 42;
+/// (Legacy stub for RandomX: No proofs/edge_bits)
+pub const PROOFSIZE: usize = 0;
 
-/// Default Cuckatoo Cycle edge_bits, used for mining and validating.
-pub const DEFAULT_MIN_EDGE_BITS: u8 = 31;
+/// Default RandomX difficulty scaling (stub; RandomX uses hash-based diff)
+pub const DEFAULT_MIN_EDGE_BITS: u8 = 0;
 
-/// Cuckaroo* proof-of-work edge_bits, meant to be ASIC resistant.
-pub const SECOND_POW_EDGE_BITS: u8 = 29;
+/// (Legacy stub)
+pub const SECOND_POW_EDGE_BITS: u8 = 0;
 
 /// Original reference edge_bits to compute difficulty factors for higher
-/// Cuckoo graph sizes, changing this would hard fork
-pub const BASE_EDGE_BITS: u8 = 24;
+/// graphs, changing this would hard fork (stubbed for RandomX)
+pub const BASE_EDGE_BITS: u8 = 0;
 
 /// Default number of blocks in the past when cross-block cut-through will start
 /// happening. Needs to be long enough to not overlap with a long reorg.
@@ -133,52 +156,27 @@ pub const KERNEL_WEIGHT: u64 = 3;
 ///
 pub const MAX_BLOCK_WEIGHT: u64 = 40_000;
 
-/// Fork every 6 months.
-pub const HARD_FORK_INTERVAL: u64 = YEAR_HEIGHT / 2;
+/// Fork every 6 months (large interval for new coin; adjust for future upgrades).
+pub const HARD_FORK_INTERVAL: u64 = 10 * YEAR_HEIGHT; // Effectively no forks until planned
 
-/// Testnet first hard fork height, set to happen around 2019-06-20
-pub const TESTNET_FIRST_HARD_FORK: u64 = 185_040;
-
-/// Testnet second hard fork height, set to happen around 2019-12-19
-pub const TESTNET_SECOND_HARD_FORK: u64 = 298_080;
-
-/// Testnet second hard fork height, set to happen around 2020-06-20
-pub const TESTNET_THIRD_HARD_FORK: u64 = 552_960;
-
-/// Testnet second hard fork height, set to happen around 2020-12-8
-pub const TESTNET_FOURTH_HARD_FORK: u64 = 642_240;
-
-/// Fork every 3 blocks
-pub const TESTING_HARD_FORK_INTERVAL: u64 = 3;
+/// Fork every 3 blocks (for testing; new coin can set high to disable)
+pub const TESTING_HARD_FORK_INTERVAL: u64 = YEAR_HEIGHT;
 
 /// Compute possible block version at a given height, implements
-/// 6 months interval scheduled hard forks for the first 2 years.
+/// interval scheduled hard forks.
 pub fn header_version(height: u64) -> HeaderVersion {
 	let hf_interval = (1 + height / HARD_FORK_INTERVAL) as u16;
 	match global::get_chain_type() {
-		global::ChainTypes::Mainnet => HeaderVersion(min(5, hf_interval)),
+		global::ChainTypes::Mainnet | global::ChainTypes::Testnet => HeaderVersion(1), // Start at v1 for new coin
 		global::ChainTypes::AutomatedTesting | global::ChainTypes::UserTesting => {
 			let testing_hf_interval = (1 + height / TESTING_HARD_FORK_INTERVAL) as u16;
-			HeaderVersion(min(5, testing_hf_interval))
-		}
-		global::ChainTypes::Testnet => {
-			if height < TESTNET_FIRST_HARD_FORK {
-				HeaderVersion(1)
-			} else if height < TESTNET_SECOND_HARD_FORK {
-				HeaderVersion(2)
-			} else if height < TESTNET_THIRD_HARD_FORK {
-				HeaderVersion(3)
-			} else if height < TESTNET_FOURTH_HARD_FORK {
-				HeaderVersion(4)
-			} else {
-				HeaderVersion(5)
-			}
+			HeaderVersion(min(5, testing_hf_interval)) // Keep for tests
 		}
 	}
 }
 
 /// Check whether the block version is valid at a given height, implements
-/// 6 months interval scheduled hard forks for the first 2 years.
+/// interval scheduled hard forks.
 pub fn valid_header_version(height: u64, version: HeaderVersion) -> bool {
 	version == header_version(height)
 }
@@ -203,22 +201,14 @@ pub const DMA_DAMP_FACTOR: u64 = 3;
 pub const AR_SCALE_DAMP_FACTOR: u64 = 13;
 
 /// Compute weight of a graph as number of siphash bits defining the graph
-/// The height dependence allows a 30-week linear transition from C31+ to C32+ starting after 1 year
-pub fn graph_weight(height: u64, edge_bits: u8) -> u64 {
-	let mut xpr_edge_bits = edge_bits as u64;
-
-	let expiry_height = YEAR_HEIGHT;
-	if edge_bits == 31 && height >= expiry_height {
-		xpr_edge_bits = xpr_edge_bits.saturating_sub(1 + (height - expiry_height) / WEEK_HEIGHT);
-	}
-	// For C31 xpr_edge_bits reaches 0 at height YEAR_HEIGHT + 30 * WEEK_HEIGHT
-	// 30 weeks after Jan 15, 2020 would be Aug 12, 2020
-
-	(2u64 << (edge_bits - global::base_edge_bits()) as u64) * xpr_edge_bits
+/// (Stubbed for RandomX: Fixed weight, no graphs)
+pub fn graph_weight(_height: u64, _edge_bits: u8) -> u64 {
+	1 // Unit weight for RandomX hash difficulty
 }
 
 /// minimum solution difficulty after HardFork4 when PoW becomes primary only Cuckatoo32+
-pub const C32_GRAPH_WEIGHT: u64 = (2u64 << (32 - BASE_EDGE_BITS) as u64) * 32; // 16384
+/// (Stubbed for RandomX)
+pub const C32_GRAPH_WEIGHT: u64 = 1;
 
 /// Minimum difficulty, enforced in Damped Moving Average diff retargetting
 /// avoids getting stuck when trying to increase difficulty subject to dampening
@@ -229,8 +219,8 @@ pub const MIN_DMA_DIFFICULTY: u64 = DMA_DAMP_FACTOR;
 pub const MIN_AR_SCALE: u64 = AR_SCALE_DAMP_FACTOR;
 
 /// unit difficulty, equal to graph_weight(SECOND_POW_EDGE_BITS)
-pub const UNIT_DIFFICULTY: u64 =
-	((2 as u64) << (SECOND_POW_EDGE_BITS - BASE_EDGE_BITS)) * (SECOND_POW_EDGE_BITS as u64);
+/// (Stubbed for RandomX)
+pub const UNIT_DIFFICULTY: u64 = 1;
 
 /// The initial difficulty at launch. This should be over-estimated
 /// and difficulty should come down at launch rather than up
@@ -282,8 +272,7 @@ impl HeaderDifficultyInfo {
 			timestamp,
 			difficulty,
 			secondary_scaling: global::initial_graph_weight(),
-
-			is_secondary: true,
+			is_secondary: false, // RandomX: No secondary
 		}
 	}
 
@@ -298,7 +287,7 @@ impl HeaderDifficultyInfo {
 			timestamp: 1,
 			difficulty,
 			secondary_scaling,
-			is_secondary: true,
+			is_secondary: false, // RandomX: No secondary
 		}
 	}
 }
@@ -431,10 +420,11 @@ pub fn secondary_pow_scaling(height: u64, diff_data: &[HeaderDifficultyInfo]) ->
 #[cfg(test)]
 mod test {
 	use super::*;
+	use crate::global::ChainTypes;
 
 	#[test]
 	fn test_graph_weight() {
-		global::set_local_chain_type(global::ChainTypes::Mainnet);
+		global::set_local_chain_type(ChainTypes::Mainnet);
 
 		// initial weights
 		assert_eq!(graph_weight(1, 31), 256 * 31);

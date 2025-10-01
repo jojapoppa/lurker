@@ -23,6 +23,10 @@ use crate::ser::{
 };
 use crate::{consensus, global};
 use enum_primitive::FromPrimitive;
+use grin_util::secp;
+use grin_util::secp::pedersen::{Commitment, RangeProof};
+use grin_util::static_secp_instance;
+use grin_util::ToHex;
 use keychain::{self, BlindingFactor};
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -31,10 +35,6 @@ use std::cmp::{max, min};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Display;
 use std::{error, fmt};
-use util::secp;
-use util::secp::pedersen::{Commitment, RangeProof};
-use util::static_secp_instance;
-use util::ToHex;
 
 /// Fee fields as in fix-fees RFC: { future_use: 20, fee_shift: 4, fee: 40 }
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -17,8 +17,8 @@
 
 use crate::core::committed::Committed;
 use crate::ser::{self, Readable, Reader, Writeable, Writer};
-use util::secp::pedersen::Commitment;
-use util::secp_static;
+use grin_util::secp::pedersen::Commitment;
+use grin_util::secp_static;
 
 /// The output_sum and kernel_sum for a given block.
 /// This is used to validate the next block being processed by applying

@@ -23,19 +23,19 @@ use crate::core::hash::{DefaultHashable, Hash, Hashed};
 use crate::global::PROTOCOL_VERSION;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use bytes::Buf;
+use grin_util::secp::constants::{
+	AGG_SIGNATURE_SIZE, COMPRESSED_PUBLIC_KEY_SIZE, MAX_PROOF_SIZE, PEDERSEN_COMMITMENT_SIZE,
+	SECRET_KEY_SIZE,
+};
+use grin_util::secp::key::PublicKey;
+use grin_util::secp::pedersen::{Commitment, RangeProof};
+use grin_util::secp::Signature;
+use grin_util::secp::{ContextFlag, Secp256k1};
 use keychain::{BlindingFactor, Identifier, IDENTIFIER_SIZE};
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
 use std::io::{self, Read, Write};
 use std::{cmp, error, marker, string};
-use util::secp::constants::{
-	AGG_SIGNATURE_SIZE, COMPRESSED_PUBLIC_KEY_SIZE, MAX_PROOF_SIZE, PEDERSEN_COMMITMENT_SIZE,
-	SECRET_KEY_SIZE,
-};
-use util::secp::key::PublicKey;
-use util::secp::pedersen::{Commitment, RangeProof};
-use util::secp::Signature;
-use util::secp::{ContextFlag, Secp256k1};
 
 /// Possible errors deriving from serializing or deserializing.
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

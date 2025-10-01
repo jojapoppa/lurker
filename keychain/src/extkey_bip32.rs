@@ -35,10 +35,10 @@ use std::io::Cursor;
 use std::str::FromStr;
 use std::{error, fmt};
 
-use crate::grin_util::secp::key::{PublicKey, SecretKey};
-use crate::grin_util::secp::{self, ContextFlag, Secp256k1};
 use crate::mnemonic;
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
+use grin_util::secp::key::{PublicKey, SecretKey};
+use grin_util::secp::{self, ContextFlag, Secp256k1};
 
 use digest::generic_array::GenericArray;
 use digest::Digest;
@@ -47,15 +47,36 @@ use ripemd160::Ripemd160;
 use sha2::{Sha256, Sha512};
 
 use crate::base58;
+use grin_util::impl_array_newtype;
+use grin_util::impl_array_newtype_encodable;
+use grin_util::impl_array_newtype_show;
+use grin_util::impl_index_newtype;
 
 // Create alias for HMAC-SHA512
 type HmacSha512 = Hmac<Sha512>;
+
+use std::ops::Deref;
+impl Deref for ChainCode {
+	type Target = [u8; 32];
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
 
 /// A chain code
 pub struct ChainCode([u8; 32]);
 impl_array_newtype!(ChainCode, u8, 32);
 impl_array_newtype_show!(ChainCode);
 impl_array_newtype_encodable!(ChainCode, u8, 32);
+
+impl Deref for Fingerprint {
+	type Target = [u8; 4];
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
 
 /// A fingerprint
 pub struct Fingerprint([u8; 4]);
@@ -641,8 +662,8 @@ mod tests {
 	use std::str::FromStr;
 	use std::string::ToString;
 
-	use crate::grin_util::from_hex;
-	use crate::grin_util::secp::Secp256k1;
+	use grin_util::from_hex;
+	use grin_util::secp::Secp256k1;
 
 	use super::*;
 

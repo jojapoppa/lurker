@@ -21,8 +21,8 @@ use crate::libtx::{
 	aggsig,
 	proof::{self, ProofBuild},
 };
+use grin_util::{secp, static_secp_instance};
 use keychain::{Identifier, Keychain, SwitchCommitmentType};
-use util::{secp, static_secp_instance};
 
 /// output a reward output
 pub fn output<K, B>(

@@ -14,16 +14,16 @@
 
 //! Sane serialization & deserialization of cryptographic structs into hex
 
+use grin_util::secp::pedersen::{Commitment, RangeProof};
+use grin_util::{from_hex, ToHex};
 use keychain::BlindingFactor;
 use serde::{Deserialize, Deserializer, Serializer};
-use util::secp::pedersen::{Commitment, RangeProof};
-use util::{from_hex, ToHex};
 
 /// Serializes a secp PublicKey to and from hex
 pub mod pubkey_serde {
+	use grin_util::secp::key::PublicKey;
+	use grin_util::{from_hex, static_secp_instance, ToHex};
 	use serde::{Deserialize, Deserializer, Serializer};
-	use util::secp::key::PublicKey;
-	use util::{from_hex, static_secp_instance, ToHex};
 
 	///
 	pub fn serialize<S>(key: &PublicKey, serializer: S) -> Result<S::Ok, S::Error>
@@ -53,9 +53,9 @@ pub mod pubkey_serde {
 
 /// Serializes an Option<secp::Signature> to and from hex
 pub mod option_sig_serde {
+	use grin_util::{from_hex, secp, static_secp_instance, ToHex};
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
-	use util::{from_hex, secp, static_secp_instance, ToHex};
 
 	///
 	pub fn serialize<S>(sig: &Option<secp::Signature>, serializer: S) -> Result<S::Ok, S::Error>
@@ -99,9 +99,9 @@ pub mod option_sig_serde {
 
 /// Serializes an Option<secp::SecretKey> to and from hex
 pub mod option_seckey_serde {
+	use grin_util::{from_hex, secp, static_secp_instance, ToHex};
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
-	use util::{from_hex, secp, static_secp_instance, ToHex};
 
 	///
 	pub fn serialize<S>(
@@ -144,9 +144,9 @@ pub mod option_seckey_serde {
 
 /// Serializes a secp::Signature to and from hex
 pub mod sig_serde {
+	use grin_util::{from_hex, secp, static_secp_instance, ToHex};
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
-	use util::{from_hex, secp, static_secp_instance, ToHex};
 
 	///
 	pub fn serialize<S>(sig: &secp::Signature, serializer: S) -> Result<S::Ok, S::Error>
@@ -180,10 +180,10 @@ pub mod sig_serde {
 
 /// Serializes an Option<secp::Commitment> to and from hex
 pub mod option_commitment_serde {
+	use grin_util::secp::pedersen::Commitment;
+	use grin_util::{from_hex, ToHex};
 	use serde::de::Error;
 	use serde::{Deserialize, Deserializer, Serializer};
-	use util::secp::pedersen::Commitment;
-	use util::{from_hex, ToHex};
 
 	///
 	pub fn serialize<S>(commit: &Option<Commitment>, serializer: S) -> Result<S::Ok, S::Error>
@@ -354,9 +354,9 @@ pub mod opt_string_or_u64 {
 mod test {
 	use super::*;
 	use crate::libtx::aggsig;
-	use util::secp::key::{PublicKey, SecretKey};
-	use util::secp::{Message, Signature};
-	use util::static_secp_instance;
+	use grin_util::secp::key::{PublicKey, SecretKey};
+	use grin_util::secp::{Message, Signature};
+	use grin_util::static_secp_instance;
 
 	use serde_json;
 

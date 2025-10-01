@@ -17,9 +17,9 @@
 use crate::core::hash::{DefaultHashable, Hash, Hashed};
 use crate::ser::{self, Readable, Reader, Writeable, Writer};
 use byteorder::{ByteOrder, LittleEndian};
+use grin_util::ToHex;
 use siphasher::sip::SipHasher24;
 use std::cmp::{min, Ordering};
-use util::ToHex;
 
 /// The size of a short id used to identify inputs|outputs|kernels (6 bytes)
 pub const SHORT_ID_SIZE: usize = 6;
@@ -116,7 +116,7 @@ impl ShortId {
 
 	/// Reconstructs a switch commit hash from a hex string.
 	pub fn from_hex(hex: &str) -> Result<ShortId, ser::Error> {
-		let bytes = util::from_hex(hex)
+		let bytes = grin_util::from_hex(hex)
 			.map_err(|_| ser::Error::HexError("short_id from_hex error".to_string()))?;
 		Ok(ShortId::from_bytes(&bytes))
 	}

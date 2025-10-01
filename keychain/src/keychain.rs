@@ -23,9 +23,9 @@ use crate::extkey_bip32::{BIP32GrinHasher, ExtendedPrivKey, ExtendedPubKey};
 use crate::types::{
 	BlindSum, BlindingFactor, Error, ExtKeychainPath, Identifier, Keychain, SwitchCommitmentType,
 };
-use crate::util::secp::key::{PublicKey, SecretKey};
-use crate::util::secp::pedersen::Commitment;
-use crate::util::secp::{self, Message, Secp256k1, Signature};
+use grin_util::secp::key::{PublicKey, SecretKey};
+use grin_util::secp::pedersen::Commitment;
+use grin_util::secp::{self, Message, Secp256k1, Signature};
 
 #[derive(Clone, Debug)]
 pub struct ExtKeychain {
@@ -212,9 +212,9 @@ impl Keychain for ExtKeychain {
 mod test {
 	use crate::keychain::ExtKeychain;
 	use crate::types::{BlindSum, BlindingFactor, ExtKeychainPath, Keychain};
-	use crate::util::secp;
-	use crate::util::secp::key::SecretKey;
 	use crate::SwitchCommitmentType;
+	use grin_util::secp;
+	use grin_util::secp::key::SecretKey;
 
 	#[test]
 	fn test_key_derivation() {

@@ -16,12 +16,12 @@
 
 use crate::libtx::error::Error;
 use blake2::blake2b::blake2b;
+use grin_util::secp::key::SecretKey;
+use grin_util::secp::pedersen::{Commitment, ProofMessage, RangeProof};
+use grin_util::secp::{self, Secp256k1};
 use keychain::extkey_bip32::BIP32GrinHasher;
 use keychain::{Identifier, Keychain, SwitchCommitmentType, ViewKey};
 use std::convert::TryFrom;
-use util::secp::key::SecretKey;
-use util::secp::pedersen::{Commitment, ProofMessage, RangeProof};
-use util::secp::{self, Secp256k1};
 use zeroize::Zeroize;
 
 /// Create a bulletproof
