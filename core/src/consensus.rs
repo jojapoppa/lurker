@@ -13,8 +13,8 @@
 
 //! All the rules required for a cryptocurrency to have reach consensus across
 //! the whole network are complex and hard to completely isolate. Some can be
-// simple parameters (like block reward), others complex algorithms (like
-// Merkle sum trees or reorg rules). However, as long as they're simple
+//! simple parameters (like block reward), others complex algorithms (like
+//! Merkle sum trees or reorg rules). However, as long as they're simple
 //! enough, consensus-relevant constants and short functions should be kept
 //! here.
 
@@ -47,15 +47,68 @@ impl From<PowError> for Error {
 	}
 }
 
-/// Validates a block against consensus rules (RandomX PoW, difficulty, version)
-pub fn validate_block(block: &Block) -> Result<(), Error> {
-	let header = &block.header;
-	if !valid_header_version(header.height, header.version) {
-		return Err(Error::InvalidHeaderVersion);
+/// Difficulty type (adapted for RandomX: u64-based, with hash-to-difficulty conversion)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Difficulty(pub u64);
+
+impl Difficulty {
+	/// Zero difficulty
+	pub fn zero() -> Difficulty {
+		Difficulty(0)
 	}
-	header.pow.verify(header).map_err(Into::into)?;
-	// Add more checks as needed (e.g., reward sum, kernel sums, etc.)
-	Ok(())
+
+	/// Minimum DMA difficulty
+	pub fn min_dma() -> Difficulty {
+		Difficulty(MIN_DMA_DIFFICULTY)
+	}
+
+	/// Minimum WTEMA difficulty (for RandomX)
+	pub fn min_wtema() -> Difficulty {
+		Difficulty(C32_GRAPH_WEIGHT) // Stubbed value for RandomX
+	}
+
+	/// Convert to numeric value
+	pub fn to_num(&self) -> u64 {
+		self.0
+	}
+
+	/// Convert from numeric value
+	pub fn from_num(d: u64) -> Difficulty {
+		Difficulty(d)
+	}
+
+	/// For RandomX: Convert hash to difficulty (count leading zero bytes as bits of difficulty)
+	pub fn from_hash(hash: [u8; 32]) -> Difficulty {
+		let mut leading_zeros = 0u64;
+		for &byte in &hash {
+			if byte == 0 {
+				leading_zeros += 8;
+			} else {
+				leading_zeros += (byte.leading_zeros() as u64);
+				break;
+			}
+		}
+		Difficulty(1u64 << leading_zeros.min(64)) // Cap at u64::MAX
+	}
+}
+
+impl Readable for Difficulty {
+	fn read<R: Reader>(reader: &mut R) -> Result<Self, crate::ser::Error> {
+		let num = reader.read_u64()?;
+		Ok(Difficulty::from_num(num))
+	}
+}
+
+impl Writeable for Difficulty {
+	fn write<W: Writer>(&self, writer: &mut W) -> Result<(), crate::ser::Error> {
+		writer.write_u64(self.0)
+	}
+}
+
+impl std::fmt::Display for Difficulty {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.0)
+	}
 }
 
 /// A grin is divisible to 10^9, following the SI prefixes

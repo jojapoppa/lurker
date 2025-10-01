@@ -21,7 +21,10 @@ use crate::ser::{self, Error, ProtocolVersion, Readable, Reader, Writeable, Writ
 use blake2::blake2b::Blake2b;
 use byteorder::{BigEndian, ByteOrder};
 use grin_util::ToHex;
-use std::{cmp::min, convert::AsRef, fmt, ops};
+use std::cmp::min;
+use std::convert::AsRef;
+use std::fmt;
+use std::ops;
 
 /// A hash consisting of all zeroes, used as a sentinel. No known preimage.
 pub const ZERO_HASH: Hash = Hash([0; 32]);
@@ -209,9 +212,7 @@ impl<D: DefaultHashable> Hashed for D {
 	fn hash(&self) -> Hash {
 		let mut hasher = HashWriter::default();
 		Writeable::write(self, &mut hasher).unwrap();
-		let mut ret = [0; 32];
-		hasher.finalize(&mut ret);
-		Hash(ret)
+		hasher.into_hash()
 	}
 }
 

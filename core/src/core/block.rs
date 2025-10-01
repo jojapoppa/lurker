@@ -36,12 +36,12 @@ use crate::ser_multiwrite;
 use chrono::prelude::{DateTime, Utc};
 use chrono::Duration;
 use grin_util::from_hex;
+use grin_util::{map_vec, secp, static_secp_instance};
 use keychain::BlindingFactor;
 use log::{error, trace};
 use std::convert::TryInto;
 use std::fmt;
 use std::io::Cursor;
-use util::{map_vec, secp, static_secp_instance};
 
 /// Errors thrown by Block validation
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
@@ -273,6 +273,14 @@ impl Default for BlockHeader {
 			kernel_mmr_size: 0,
 			pow: RandomXProof::default(),
 		}
+	}
+}
+
+impl DefaultHashable for BlockHeader {
+	fn hash(&self) -> Hash {
+		let mut hasher = siphash24::Hash24::new();
+		self.write(&mut hasher).unwrap();
+		Hash::from(hasher.finalize())
 	}
 }
 

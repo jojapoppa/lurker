@@ -27,10 +27,11 @@
 #![deny(unused_mut)]
 #![warn(missing_docs)]
 
+use crate::consensus::Difficulty;
 use crate::core::block::BlockHeader;
-use crate::core::ser::{ProtocolVersion, Readable, Reader, Writeable, Writer};
 use crate::genesis;
 use crate::global;
+use crate::ser::{ProtocolVersion, Readable, Reader, Writeable, Writer};
 use chrono::prelude::{DateTime, Utc};
 use randomx_rs::{RandomXCache, RandomXError, RandomXFlag, RandomXVM};
 use serde::{Deserialize, Serialize};
@@ -61,66 +62,6 @@ pub fn get_pow_type(_header: &BlockHeader) -> Result<PowType, PowError> {
 pub fn new_randomx_cache(seed: &[u8]) -> Result<RandomXCache, PowError> {
 	RandomXCache::new(RandomXFlag::DEFAULT, seed)
 		.map_err(|e: RandomXError| PowError::CacheInit(format!("RandomXError: {:?}", e)))
-}
-
-/// Temporary Difficulty stub for PoW (move to consensus.rs for full impl)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Difficulty(pub u64);
-
-impl Difficulty {
-	pub const LEN: usize = 8;
-
-	/// Zero difficulty
-	pub fn zero() -> Difficulty {
-		Difficulty(0)
-	}
-
-	/// Minimum DMA difficulty
-	pub fn min_dma() -> Difficulty {
-		Difficulty(global::MIN_DMA_DIFFICULTY)
-	}
-
-	/// Minimum WTEMA difficulty (for RandomX)
-	pub fn min_wtema() -> Difficulty {
-		Difficulty(global::C32_GRAPH_WEIGHT) // Stubbed value
-	}
-
-	/// Convert to numeric value
-	pub fn to_num(&self) -> u64 {
-		self.0
-	}
-
-	/// Convert from numeric value
-	pub fn from_num(d: u64) -> Difficulty {
-		Difficulty(d)
-	}
-
-	/// For RandomX: Convert hash to difficulty (count leading zero bytes as bits of difficulty)
-	pub fn from_hash(hash: [u8; 32]) -> Difficulty {
-		let mut leading_zeros = 0u64;
-		for &byte in &hash {
-			if byte == 0 {
-				leading_zeros += 8;
-			} else {
-				leading_zeros += (byte.leading_zeros() as u64);
-				break;
-			}
-		}
-		Difficulty(1u64 << leading_zeros.min(64)) // Cap at u64::MAX
-	}
-}
-
-impl Readable for Difficulty {
-	fn read<R: Reader>(reader: &mut R) -> Result<Self, crate::ser::Error> {
-		let num = reader.read_u64()?;
-		Ok(Difficulty::from_num(num))
-	}
-}
-
-impl Writeable for Difficulty {
-	fn write<W: Writer>(&self, writer: &mut W) -> Result<(), crate::ser::Error> {
-		writer.write_u64(self.0)
-	}
 }
 
 /// RandomX-specific proof of work
@@ -200,12 +141,12 @@ impl ProofOfWork for RandomXProofOfWork {
 }
 
 /// Validates the proof of work of a given header (RandomX version).
-pub fn verify_size(bh: &BlockHeader) -> Result<(), PowError> {
-	bh.pow.verify(bh)
+pub fn verify_size(bh: &BlockHeader) -> Result<(), Error> {
+	bh.pow.verify(bh).map_err(Into::into)
 }
 
 /// Mines a genesis block using the internal miner
-pub fn mine_genesis_block() -> Result<Block, PowError> {
+pub fn mine_genesis_block() -> Result<Block, Error> {
 	let mut gen = genesis::genesis_dev();
 
 	// total_difficulty on the genesis header *is* the difficulty of that block
@@ -223,7 +164,7 @@ pub fn mine_genesis_block() -> Result<Block, PowError> {
 
 /// Runs a proof of work computation over the provided block header until the required difficulty target is reached.
 /// May take a while for a low target...
-pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), PowError> {
+pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), Error> {
 	let mut seed = bh.pre_pow();
 	let mut nonce = bh.pow.nonce;
 	let mut start_nonce = nonce;
@@ -249,15 +190,14 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), PowError> 
 		}
 
 		// Increment nonce
-		let (new_nonce, overflowed) = nonce.overflowing_add(1);
-		nonce = new_nonce;
+		nonce = nonce.overflowing_add(1).0;
 
 		// If nonce wraps, update timestamp (changes seed)
-		if overflowed {
+		if nonce == start_nonce {
 			bh.timestamp = Utc::now();
 			seed = bh.pre_pow();
 			// Recreate cache for new seed
-			let new_cache = new_randomx_cache(&seed)?;
+			let new_cache = new_randomx_cache(&seed).map_err(Into::into)?;
 			bh.pow.cache = Some(new_cache);
 			drop(cache);
 		}
@@ -267,10 +207,8 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), PowError> 
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::genesis;
-	use crate::global::{set_local_chain_type, ChainTypes};
+	use crate::global::ChainTypes;
 
-	/// Test RandomX cache creation
 	#[test]
 	fn test_new_randomx_cache() {
 		let seed = b"test_seed_32_bytes!!"; // RandomX requires >=32 bytes
@@ -279,10 +217,9 @@ mod test {
 		drop(cache);
 	}
 
-	/// Test genesis PoW mining
 	#[test]
 	fn genesis_pow() {
-		set_local_chain_type(ChainTypes::UserTesting);
+		global::set_local_chain_type(ChainTypes::UserTesting);
 
 		let mut b = genesis::genesis_dev();
 		b.header.pow.nonce = 0; // Start from 0

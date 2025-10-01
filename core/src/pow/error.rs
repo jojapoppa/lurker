@@ -12,9 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Cuckatoo specific errors
+use thiserror::Error;
 
-/// Cuckatoo solver or validation error
+#[derive(Debug, Error)]
+pub enum PowError {
+	#[error("Cache initialization failed: {0}")]
+	CacheInit(String),
+	#[error("VM creation failed")]
+	VMCreate,
+	#[error("Hash calculation failed")]
+	HashFail,
+	#[error("Invalid nonce")]
+	InvalidNonce,
+	#[error("Unsupported PoW version")]
+	UnsupportedVersion,
+}
+
 #[derive(Debug, thiserror::Error)]
 /// Libwallet error types
 pub enum Error {
