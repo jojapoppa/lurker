@@ -21,7 +21,7 @@ use crate::consensus::Difficulty;
 use crate::core;
 use crate::core::hash::Hash;
 use crate::global;
-use crate::pow::{mine_genesis_block, ProofOfWork, RandomXProofOfWork};
+use crate::pow::{mine_genesis_block, RandomXProofOfWork};
 use chrono::prelude::{TimeZone, Utc};
 use grin_util::secp::constants::SINGLE_BULLET_PROOF_SIZE;
 use grin_util::secp::pedersen::{Commitment, RangeProof};
@@ -32,16 +32,16 @@ use keychain::BlindingFactor;
 /// is small enough to mine it on the fly, so it does not contain its own
 /// proof of work solution. Can also be easily mutated for different tests.
 pub fn genesis_dev() -> core::Block {
-	let mut gen = core::Block::with_header(core::BlockHeader {
+	core::Block::with_header(core::BlockHeader {
 		height: 0,
 		timestamp: Utc.with_ymd_and_hms(1997, 8, 4, 0, 0, 0).unwrap(),
-		pow: ProofOfWork {
+		pow: RandomXProofOfWork {
 			nonce: 0, // Hardcoded nonce for dev (replace with mined value if needed)
-			..Default::default()
+			total_difficulty: Difficulty::zero(),
+			cache: None,
 		},
 		..Default::default()
-	});
-	gen
+	})
 }
 
 /// Testnet genesis block
@@ -71,11 +71,10 @@ pub fn genesis_test() -> core::Block {
 		.unwrap(),
 		output_mmr_size: 1,
 		kernel_mmr_size: 1,
-		pow: ProofOfWork {
-			total_difficulty: Difficulty::from_num(10_u64.pow(5)),
-			secondary_scaling: 1856,
+		pow: RandomXProofOfWork {
 			nonce: 23, // Hardcoded nonce for testnet
-			..Default::default()
+			total_difficulty: Difficulty::from_num(10_u64.pow(5)),
+			cache: None,
 		},
 		..Default::default()
 	});
@@ -134,11 +133,10 @@ pub fn genesis_main() -> core::Block {
 		.unwrap(),
 		output_mmr_size: 1,
 		kernel_mmr_size: 1,
-		pow: ProofOfWork {
-			total_difficulty: Difficulty::from_num(2_u64.pow(34)),
-			secondary_scaling: 1856,
+		pow: RandomXProofOfWork {
 			nonce: 41, // Hardcoded nonce for mainnet
-			..Default::default()
+			total_difficulty: Difficulty::from_num(2_u64.pow(34)),
+			cache: None,
 		},
 		..Default::default()
 	});

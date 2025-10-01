@@ -25,6 +25,7 @@ use crate::pow::{PowError, RandomXProofOfWork};
 use crate::ser::{Readable, Reader, Writeable, Writer};
 use serde::{Deserialize, Serialize};
 use std::cmp::{max, min};
+use std::ops::Add;
 
 /// Errors specific to consensus rules
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +45,17 @@ pub enum Error {
 impl From<PowError> for Error {
 	fn from(e: PowError) -> Self {
 		Error::PowVerification(e)
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Difficulty(pub u64);
+
+impl Add for Difficulty {
+	type Output = Self;
+
+	fn add(self, other: Self) -> Self {
+		Difficulty(self.0 + other.0)
 	}
 }
 
@@ -218,7 +230,7 @@ pub const TESTING_HARD_FORK_INTERVAL: u64 = YEAR_HEIGHT;
 /// Compute possible block version at a given height, implements
 /// interval scheduled hard forks.
 pub fn header_version(height: u64) -> HeaderVersion {
-	let hf_interval = (1 + height / HARD_FORK_INTERVAL) as u16;
+	//let hf_interval = (1 + height / HARD_FORK_INTERVAL) as u16;
 	match global::get_chain_type() {
 		global::ChainTypes::Mainnet | global::ChainTypes::Testnet => HeaderVersion(1), // Start at v1 for new coin
 		global::ChainTypes::AutomatedTesting | global::ChainTypes::UserTesting => {

@@ -12,32 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
 //! Values that should be shared across all modules, without necessarily
 //! having to pass them all over the place, but aren't consensus values.
 //! should be used sparingly.
 
 use crate::consensus::{
-	graph_weight, header_version, HeaderDifficultyInfo, BASE_EDGE_BITS, BLOCK_TIME_SEC,
-	C32_GRAPH_WEIGHT, COINBASE_MATURITY, CUT_THROUGH_HORIZON, DAY_HEIGHT, DEFAULT_MIN_EDGE_BITS,
-	DMA_WINDOW, GRIN_BASE, INITIAL_DIFFICULTY, KERNEL_WEIGHT, MAX_BLOCK_WEIGHT, OUTPUT_WEIGHT,
-	PROOFSIZE, SECOND_POW_EDGE_BITS, STATE_SYNC_THRESHOLD,
+	self, graph_weight, header_version, reward, Difficulty, HeaderDifficultyInfo, BASE_EDGE_BITS,
+	BLOCK_TIME_SEC, C32_GRAPH_WEIGHT, COINBASE_MATURITY, CUT_THROUGH_HORIZON, DAY_HEIGHT,
+	DEFAULT_MIN_EDGE_BITS, DMA_WINDOW, GRIN_BASE, INITIAL_DIFFICULTY, KERNEL_WEIGHT,
+	MAX_BLOCK_WEIGHT, OUTPUT_WEIGHT, PROOFSIZE, REWARD, SECOND_POW_EDGE_BITS, STATE_SYNC_THRESHOLD,
 };
-use crate::core::block::Block;
-use crate::core::block::HeaderVersion;
+
+use crate::core::block::{Block, HeaderVersion};
 use crate::genesis;
-use crate::pow::{PowError, PowType, RandomXProofOfWork}; // Assume RandomXProofOfWork impls needed traits
+use crate::pow::{new_randomx_cache, Error as PowError, PowType, RandomXProofOfWork};
 use crate::ser::ProtocolVersion;
 use grin_util::OneTime;
 use std::cell::Cell;
-
-/// An enum collecting sets of parameters used throughout the
-/// code wherever mining is needed. This should allow for
-/// different sets of parameters for different purposes,
-/// e.g. CI, User testing, production values
-/// Define these here, as they should be developer-set, not really tweakable
-/// by users
 
 /// The default "local" protocol version for this node.
 /// We negotiate compatible versions with each peer via Hand/Shake.
@@ -324,13 +315,13 @@ pub fn is_nrd_enabled() -> bool {
 pub fn create_pow_context(
 	height: u64,
 	seed: &[u8], // From BlockHeader::pre_pow()
-) -> Result<RandomXProofOfWork, pow::Error> {
+) -> Result<RandomXProofOfWork, PowError> {
 	// For RandomX: Always use DEFAULT flags; version-based if needed later
 	match header_version(height) {
 		HeaderVersion(v) if (1..=3).contains(&v) => Err(PowError::UnsupportedVersion), // Pre-RandomX
 		_ => {
 			// Init cache from seed
-			let cache = crate::pow::new_randomx_cache(seed)?; // From pow.rs
+			let cache = new_randomx_cache(seed)?;
 			Ok(RandomXProofOfWork::new(cache)) // Constructor takes cache
 		}
 	}
@@ -496,7 +487,10 @@ where
 		let mut last_ts = last_n.last().unwrap().timestamp;
 		for _ in n..needed_block_count {
 			last_ts = last_ts.saturating_sub(last_ts_delta);
-			last_n.push(HeaderDifficultyInfo::from_ts_diff(last_ts, last_diff));
+			last_n.push(HeaderDifficultyInfo::from_ts_diff(
+				last_ts,
+				last_diff.clone(),
+			));
 		}
 	}
 	last_n.reverse();
@@ -504,11 +498,10 @@ where
 }
 
 /// Calculates the size of a header (in bytes) given a number of edge bits in the PoW
-/// (Adapted for RandomX: fixed size, ignores edge_bits)
 #[inline]
 pub fn header_size_bytes(_edge_bits: u8) -> usize {
 	let base_size = 2 + 2 * 8 + 5 * 32 + 32 + 2 * 8; // Version, height, prev_hash, etc.
-	let pow_size = 8 + Difficulty::LEN; // Nonce (u64) + difficulty
+	let pow_size = 8 + 8; // Nonce (u64) + difficulty (u64)
 	base_size + pow_size
 }
 
@@ -517,41 +510,52 @@ mod test {
 	use super::*;
 	use crate::core::Block;
 	use crate::genesis::*;
-	use crate::pow::mine_genesis_block;
 	use crate::ser::{BinWriter, ProtocolVersion, Writeable};
 
-	fn test_header_len(genesis: Block) {
-		let mut raw = Vec::<u8>::with_capacity(1_024);
-		let mut writer = BinWriter::new(&mut raw, ProtocolVersion::V2); // Use V2 for consistency
+	fn test_header_len(genesis: Block) -> usize {
+		let mut raw = vec![];
+		let mut writer = BinWriter::new(&mut raw, ProtocolVersion::V2);
 		genesis.header.write(&mut writer).unwrap();
-		assert_eq!(raw.len(), header_size_bytes(genesis.header.pow.nonce as u8)); // Stub edge_bits from nonce
+		raw.len()
 	}
 
 	#[test]
 	fn automated_testing_header_len() {
 		set_local_chain_type(ChainTypes::AutomatedTesting);
-		let genesis = mine_genesis_block().unwrap(); // Assume adapted for RandomX
-		test_header_len(genesis);
+		let genesis = mine_genesis_block().unwrap();
+		assert_eq!(
+			test_header_len(genesis),
+			header_size_bytes(genesis.header.pow.nonce as u8)
+		);
 	}
 
 	#[test]
 	fn user_testing_header_len() {
 		set_local_chain_type(ChainTypes::UserTesting);
 		let genesis = mine_genesis_block().unwrap();
-		test_header_len(genesis);
+		assert_eq!(
+			test_header_len(genesis),
+			header_size_bytes(genesis.header.pow.nonce as u8)
+		);
 	}
 
 	#[test]
 	fn testnet_header_len() {
 		set_local_chain_type(ChainTypes::Testnet);
 		let genesis = genesis_test();
-		test_header_len(genesis);
+		assert_eq!(
+			test_header_len(genesis),
+			header_size_bytes(genesis.header.pow.nonce as u8)
+		);
 	}
 
 	#[test]
 	fn mainnet_header_len() {
 		set_local_chain_type(ChainTypes::Mainnet);
 		let genesis = genesis_main();
-		test_header_len(genesis);
+		assert_eq!(
+			test_header_len(genesis),
+			header_size_bytes(genesis.header.pow.nonce as u8)
+		);
 	}
 }

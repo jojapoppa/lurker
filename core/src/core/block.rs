@@ -19,29 +19,29 @@
 use crate::consensus::{self, reward, Difficulty, REWARD};
 use crate::core::committed::{self, Committed};
 use crate::core::compact_block::CompactBlock;
-use crate::core::hash::{DefaultHashable, Hashed, ZERO_HASH};
+use crate::core::hash::{DefaultHashable, Hash, Hashed, ZERO_HASH};
 use crate::core::pmmr; // For pmmr::n_leaves, etc.
-use crate::core::pow::{PowError, PowType, RandomXProof};
 use crate::core::{
 	transaction, Commitment, Inputs, KernelFeatures, Output, Transaction, TransactionBody,
 	TxKernel, Weighting,
 };
 use crate::global;
+use crate::pow::{PowError, PowType, ProofOfWork, RandomXProofOfWork};
 use crate::ser::PMMRable; // PMMRable trait lives here, not in pmmr
 
 use crate::ser::{self, BinWriter, ProtocolVersion, Readable, Reader, Writeable, Writer};
 use crate::ser_multiread;
 use crate::ser_multiwrite;
+use siphasher::siphash24;
 
 use chrono::prelude::{DateTime, Utc};
 use chrono::Duration;
 use grin_util::from_hex;
-use grin_util::{map_vec, secp, static_secp_instance};
+use grin_util::{secp, static_secp_instance};
 use keychain::BlindingFactor;
 use log::{error, trace};
 use std::convert::TryInto;
 use std::fmt;
-use std::io::Cursor;
 
 /// Errors thrown by Block validation
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
@@ -85,6 +85,8 @@ pub enum Error {
 	Serialization(ser::Error),
 	/// Other unspecified error condition
 	Other(String),
+	/// PoW error
+	Pow(PowError),
 }
 
 impl From<committed::Error> for Error {
@@ -117,6 +119,12 @@ impl From<keychain::Error> for Error {
 	}
 }
 
+impl From<PowError> for Error {
+	fn from(e: PowError) -> Error {
+		Error::Pow(e)
+	}
+}
+
 impl fmt::Display for Error {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -140,6 +148,7 @@ impl fmt::Display for Error {
 			Error::CutThrough => write!(f, "Cut-through invalid"),
 			Error::Serialization(e) => write!(f, "Serialization error: {}", e),
 			Error::Other(s) => write!(f, "Other block error: {}", s),
+			Error::Pow(e) => write!(f, "PoW error: {}", e),
 		}
 	}
 }
@@ -224,7 +233,7 @@ impl Readable for HeaderVersion {
 }
 
 /// Block header, fairly standard compared to other blockchains.
-#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize, DefaultHashable)]
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 pub struct BlockHeader {
 	/// Version of the block
 	pub version: HeaderVersion,
@@ -251,8 +260,11 @@ pub struct BlockHeader {
 	/// Total size of the kernel MMR after applying this block
 	pub kernel_mmr_size: u64,
 	/// Proof of work (RandomX-specific now)
-	pub pow: RandomXProof,
+	pub pow: RandomXProofOfWork,
 }
+
+// Explicitly implement DefaultHashable for BlockHeader
+impl DefaultHashable for BlockHeader {}
 
 impl Default for BlockHeader {
 	fn default() -> BlockHeader {
@@ -271,16 +283,8 @@ impl Default for BlockHeader {
 			total_kernel_offset: BlindingFactor::zero(),
 			output_mmr_size: 0,
 			kernel_mmr_size: 0,
-			pow: RandomXProof::default(),
+			pow: RandomXProofOfWork::default(),
 		}
-	}
-}
-
-impl DefaultHashable for BlockHeader {
-	fn hash(&self) -> Hash {
-		let mut hasher = siphash24::Hash24::new();
-		self.write(&mut hasher).unwrap();
-		Hash::from(hasher.finalize())
 	}
 }
 
@@ -291,13 +295,13 @@ impl BlockHeader {
 	}
 
 	/// Direct access to PoW
-	pub fn pow(&self) -> &RandomXProof {
+	pub fn pow(&self) -> &RandomXProofOfWork {
 		&self.pow
 	}
 
 	/// Total difficulty accumulated by the proof of work on this header
 	pub fn total_difficulty(&self) -> Difficulty {
-		self.pow.total_difficulty()
+		self.pow.total_difficulty
 	}
 
 	/// Hash without nonce for RandomX seed
@@ -336,13 +340,14 @@ impl PMMRable for BlockHeader {
 
 	// Size is hash + u64 + difficulty + u32 + u8.
 	fn elmt_size() -> Option<u16> {
-		const LEN: usize = Hash::LEN + 8 + Difficulty::LEN + 4 + 1;
+		const LEN: usize = Hash::LEN + 8 + 8 + 4 + 1; // Updated for Difficulty (u64)
 		Some(LEN.try_into().unwrap())
 	}
 }
 
 /// Stub for RandomX size verification (always valid)
-fn verify_size(_header: &BlockHeader) -> Result<(), Error> {
+pub fn verify_size(_header: &BlockHeader) -> Result<(), Error> {
+	// For RandomX: nonce in 0..u64::MAX? Always true.
 	Ok(())
 }
 
@@ -367,8 +372,7 @@ fn read_block_header<R: Reader>(reader: &mut R) -> Result<BlockHeader, ser::Erro
 	let kernel_root = Hash::read(reader)?;
 	let total_kernel_offset = BlindingFactor::read(reader)?;
 	let (output_mmr_size, kernel_mmr_size) = ser_multiread!(reader, read_u64, read_u64);
-
-	let pow = RandomXProof::read(reader)?;
+	let pow = RandomXProofOfWork::read(reader)?; // Concrete read
 
 	if timestamp
 		> chrono::NaiveDate::MAX
@@ -434,13 +438,16 @@ impl BlockHeader {
 		Ok(())
 	}
 
-	/// Return the pre-pow bytes for RandomX mining/verification
+	/// Return the pre-pow, unhashed
+	/// Let the RandomX miner/verifier handle the hashing
+	/// for consistency with how this call is performed everywhere
+	/// else
 	pub fn pre_pow(&self) -> Vec<u8> {
 		let mut header_buf = vec![];
 		{
 			let mut writer = BinWriter::default(&mut header_buf);
 			self.write_pre_pow(&mut writer).unwrap();
-			// For RandomX: seed is just this
+			// For RandomX: no pow.write_pre_pow (seed is just this), nonce separate in mining
 		}
 		header_buf
 	}
@@ -456,10 +463,9 @@ impl BlockHeader {
 		let mut header_bytes = pre_pow_bytes;
 
 		// Append serialized pow (nonce + difficulty)
-		let mut writer = Cursor::new(&mut header_bytes);
-		let w = &mut Writer::new(&mut writer, ProtocolVersion::V2);
-		w.write_u64(nonce)?;
-		difficulty.write(w)?;
+		let mut writer = Writer::new(&mut header_bytes, ProtocolVersion::V2);
+		writer.write_u64(nonce)?;
+		difficulty.write(&mut writer)?;
 
 		// Deserialize full header
 		let mut cursor = Cursor::new(header_bytes);
@@ -467,9 +473,10 @@ impl BlockHeader {
 		let mut header = BlockHeader::read(&mut reader)?;
 
 		// Set pow and verify
-		header.pow = RandomXProof {
+		header.pow = RandomXProofOfWork {
 			nonce,
 			total_difficulty: difficulty,
+			cache: None,
 		};
 		header
 			.pow
@@ -513,8 +520,8 @@ impl BlockHeader {
 	}
 
 	/// Total kernel offset for the chain state up to and including this block.
-	pub fn total_kernel_offset(&self) -> &BlindingFactor {
-		&self.total_kernel_offset
+	pub fn total_kernel_offset(&self) -> BlindingFactor {
+		self.total_kernel_offset.clone()
 	}
 }
 
@@ -527,7 +534,7 @@ impl From<UntrustedBlockHeader> for BlockHeader {
 /// Block header which does lightweight validation as part of deserialization,
 /// it supposed to be used when we can't trust the channel (eg network)
 #[derive(Debug)]
-pub struct UntrustedBlockHeader(pub BlockHeader);
+pub struct UntrustedBlockHeader(BlockHeader);
 
 /// Deserialization of an untrusted block header
 impl Readable for UntrustedBlockHeader {
@@ -540,8 +547,7 @@ impl Readable for UntrustedBlockHeader {
 			// TODO add warning in p2p code if local time is too different from peers
 			error!(
                 "block header {} validation error: block time is more than {} seconds in the future",
-                header.hash(),
-                ftl
+                header.hash(), ftl
             );
 			return Err(ser::Error::CorruptedData);
 		}
@@ -651,6 +657,8 @@ impl Block {
 	///
 	/// TODO - Move this somewhere where only tests will use it.
 	/// *** Only used in tests. ***
+	///
+	#[warn(clippy::new_ret_no_self)]
 	pub fn new(
 		prev: &BlockHeader,
 		txs: &[Transaction],
@@ -670,7 +678,7 @@ impl Block {
 	/// Note: caller must validate the block themselves, we do not validate it
 	/// here.
 	pub fn hydrate_from(cb: CompactBlock, txs: &[Transaction]) -> Result<Block, Error> {
-		trace!("block: hydrate_from: {}, {} txs", cb.hash(), txs.len());
+		trace!("block: hydrate_from: {}, {} txs", cb.hash(), txs.len(),);
 
 		let header = cb.header.clone();
 
@@ -758,9 +766,10 @@ impl Block {
 				timestamp,
 				prev_hash: prev.hash(),
 				total_kernel_offset,
-				pow: RandomXProof {
+				pow: RandomXProofOfWork {
 					nonce: 0, // Start at 0 for mining
 					total_difficulty: difficulty + prev.total_difficulty(),
+					cache: None,
 				},
 				..Default::default()
 			},
@@ -813,13 +822,13 @@ impl Block {
 		&self,
 		prev_kernel_offset: BlindingFactor,
 	) -> Result<BlindingFactor, Error> {
-		let offset = if *self.header.total_kernel_offset() == prev_kernel_offset {
+		let offset = if self.header.total_kernel_offset() == prev_kernel_offset {
 			// special case when the sum hasn't changed (typically an empty block),
 			// zero isn't a valid private key but it's a valid blinding factor
 			BlindingFactor::zero()
 		} else {
 			committed::sum_kernel_offsets(
-				vec![self.header.total_kernel_offset().clone()],
+				vec![self.header.total_kernel_offset.clone()],
 				vec![prev_kernel_offset],
 			)?
 		};
@@ -856,6 +865,7 @@ impl Block {
 			.iter()
 			.filter(|out| out.is_coinbase())
 			.collect::<Vec<&Output>>();
+
 		let cb_kerns = self
 			.body
 			.kernels
@@ -867,10 +877,12 @@ impl Block {
 			let secp = static_secp_instance();
 			let secp = secp.lock();
 			let coinbase_value = reward(self.total_fees());
-			let over_commit = secp.commit_value(-(coinbase_value as i64))?;
+			let over_commit = secp.commit_value(coinbase_value)?;
 
-			let out_adjust_sum =
-				secp.commit_sum(map_vec!(cb_outs, |x| x.commitment()), vec![over_commit])?;
+			let out_adjust_sum = secp.commit_sum(
+				cb_outs.iter().map(|x| x.commitment()).collect(),
+				vec![over_commit],
+			)?;
 
 			let kerns_sum = secp.commit_sum(cb_kerns.iter().map(|x| x.excess).collect(), vec![])?;
 
@@ -921,7 +933,8 @@ impl From<UntrustedBlock> for Block {
 
 /// Block which does lightweight validation as part of deserialization,
 /// it supposed to be used when we can't trust the channel (eg network)
-pub struct UntrustedBlock(pub Block);
+#[derive(Debug)]
+pub struct UntrustedBlock(Block);
 
 /// Deserialization of an untrusted block header
 impl Readable for UntrustedBlock {
