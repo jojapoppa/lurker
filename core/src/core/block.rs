@@ -87,6 +87,8 @@ pub enum Error {
 	Other(String),
 	/// PoW error
 	Pow(PowError),
+	/// Bad version
+	UnsupportedVersion,
 }
 
 impl From<committed::Error> for Error {
