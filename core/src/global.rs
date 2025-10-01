@@ -514,7 +514,7 @@ mod test {
 
 	fn test_header_len(genesis: Block) -> usize {
 		let mut raw = vec![];
-		let mut writer = BinWriter::new(&mut raw, ProtocolVersion::V2);
+		let mut writer = BinWriter::new(&mut raw, 2);
 		genesis.header.write(&mut writer).unwrap();
 		raw.len()
 	}

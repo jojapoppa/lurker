@@ -29,6 +29,9 @@ use crate::global;
 use crate::pow::{PowError, PowType, ProofOfWork, RandomXProofOfWork};
 use crate::ser::PMMRable; // PMMRable trait lives here, not in pmmr
 
+use crate::ser::{BinReader, BinWriter, DeserializationMode, ProtocolVersion}; // Update imports
+use std::io::Cursor; // Ensure Cursor is imported
+
 use crate::ser::{self, BinWriter, ProtocolVersion, Readable, Reader, Writeable, Writer};
 use crate::ser_multiread;
 use crate::ser_multiwrite;
@@ -151,6 +154,7 @@ impl fmt::Display for Error {
 			Error::Serialization(e) => write!(f, "Serialization error: {}", e),
 			Error::Other(s) => write!(f, "Other block error: {}", s),
 			Error::Pow(e) => write!(f, "PoW error: {}", e),
+			Error::UnsupportedVersion => write!(f, "Unsupported block version"),
 		}
 	}
 }
@@ -310,12 +314,12 @@ impl BlockHeader {
 	pub fn hash_without_nonce(&self) -> Result<Hash, ser::Error> {
 		let mut bytes = vec![];
 		let mut writer = Cursor::new(&mut bytes);
-		let w = &mut Writer::new(&mut writer, ProtocolVersion::V2);
+		let w = &mut BinWriter::new(&mut writer, ProtocolVersion(2)); // Use BinWriter
 		self.version.write(w)?;
 		self.height.write(w)?;
 		self.prev_hash.write(w)?;
 		self.prev_root.write(w)?;
-		self.timestamp.write(w)?;
+		w.write_i64(self.timestamp.timestamp())?; // Serialize timestamp as i64
 		self.output_root.write(w)?;
 		self.range_proof_root.write(w)?;
 		self.kernel_root.write(w)?;
@@ -427,13 +431,13 @@ impl BlockHeader {
 		ser_multiwrite!(
 			writer,
 			[write_u64, self.height],
-			[write_i64, self.timestamp.timestamp()],
+			[write_i64, self.timestamp.timestamp()], // Serializes timestamp as i64
 			[write_fixed_bytes, &self.prev_hash],
 			[write_fixed_bytes, &self.prev_root],
 			[write_fixed_bytes, &self.output_root],
 			[write_fixed_bytes, &self.range_proof_root],
 			[write_fixed_bytes, &self.kernel_root],
-			[write_fixed_bytes, &self.total_kernel_offset.as_inner()],
+			[write_fixed_bytes, &self.total_kernel_offset],
 			[write_u64, self.output_mmr_size],
 			[write_u64, self.kernel_mmr_size]
 		);
@@ -465,13 +469,13 @@ impl BlockHeader {
 		let mut header_bytes = pre_pow_bytes;
 
 		// Append serialized pow (nonce + difficulty)
-		let mut writer = Writer::new(&mut header_bytes, ProtocolVersion::V2);
+		let mut writer = BinWriter::new(&mut header_bytes, ProtocolVersion(2));
 		writer.write_u64(nonce)?;
 		difficulty.write(&mut writer)?;
 
 		// Deserialize full header
 		let mut cursor = Cursor::new(header_bytes);
-		let mut reader = Reader::new(&mut cursor, ProtocolVersion::V2);
+		let mut reader = BinReader::new(&mut cursor, ProtocolVersion(2), DeserializationMode::Full);
 		let mut header = BlockHeader::read(&mut reader)?;
 
 		// Set pow and verify

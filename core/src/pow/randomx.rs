@@ -34,7 +34,7 @@ impl ProofOfWork for RandomXProofOfWork {
 		// Serialize full header (including nonce) as input to VM
 		let mut header_bytes = vec![];
 		header
-			.write(&mut Writer::new(&mut header_bytes, ProtocolVersion::V2))
+			.write(&mut Writer::new(&mut header_bytes, 2))
 			.map_err(|e| PowError::Other(format!("Header serialization: {}", e)))?;
 		let input = &header_bytes[..];
 

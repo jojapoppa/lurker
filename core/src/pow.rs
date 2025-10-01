@@ -73,7 +73,7 @@ pub enum PowType {
 /// Trait for proof of work implementations
 pub trait ProofOfWork: Readable + Writeable {
     fn size(&self) -> usize;
-    fn verify(&self, header: &BlockHeader) -> Result<(), PowError>;
+    fn verify(&self, seed: &[u8]) -> Result<(), PowError>;
 }
 
 /// Returns the PoW type for a given header
@@ -102,6 +102,14 @@ pub struct RandomXProofOfWork {
     cache: Option<RandomXCache>,
 }
 
+impl PartialEq for RandomXProofOfWork {
+    fn eq(&self, other: &Self) -> bool {
+        self.nonce == other.nonce && self.total_difficulty == other.total_difficulty
+    }
+}
+
+impl Eq for RandomXProofOfWork {}
+
 impl RandomXProofOfWork {
     /// Creates a new RandomX PoW instance from cache (for mining/verif).
     pub fn new(cache: RandomXCache) -> Self {
@@ -117,18 +125,12 @@ impl RandomXProofOfWork {
         let cache = self.cache.as_ref().ok_or(PowError::CacheInit("No cache".to_string()))?;
         let vm = match RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache.clone()), None) {
             Ok(vm) => vm,
-            Err(_) => {
-                let error = PowError::VMCreate;
-                return Err(error);
-            }
+            Err(_) => return Err(PowError::VMCreate),
         };
         let input = [seed, &self.nonce.to_le_bytes()].concat();
         let hash_bytes = match vm.calculate_hash(&input) {
             Ok(bytes) => bytes,
-            Err(_) => {
-                let error = PowError::HashFail;
-                return Err(error);
-            }
+            Err(_) => return Err(PowError::HashFail),
         };
         drop(vm); // Free VM
 
@@ -150,11 +152,20 @@ impl RandomXProofOfWork {
     }
 }
 
+impl Default for RandomXProofOfWork {
+    fn default() -> Self {
+        Self {
+            nonce: 0,
+            total_difficulty: Difficulty::zero(),
+            cache: None,
+        }
+    }
+}
+
 impl Readable for RandomXProofOfWork {
     fn read<R: Reader>(reader: &mut R) -> Result<Self, crate::ser::Error> {
         let nonce = reader.read_u64()?;
         let total_difficulty = Difficulty::read(reader)?;
-        // Cache not serialized; recreated during verify
         Ok(Self {
             nonce,
             total_difficulty,
@@ -176,15 +187,14 @@ impl ProofOfWork for RandomXProofOfWork {
         8 + 8 // nonce (u64) + difficulty (u64)
     }
 
-    fn verify(&self, header: &BlockHeader) -> Result<(), PowError> {
-        let seed = &header.pre_pow();
+    fn verify(&self, seed: &[u8]) -> Result<(), PowError> {
         self.verify_internal(seed)
     }
 }
 
 /// Validates the proof of work of a given header (RandomX version).
 pub fn verify_size(bh: &BlockHeader) -> Result<(), crate::core::block::Error> {
-    match bh.pow.verify(bh) {
+    match bh.pow.verify(&bh.pre_pow()) {
         Ok(()) => Ok(()),
         Err(e) => Err(crate::core::block::Error::Pow(e)),
     }
