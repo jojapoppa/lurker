@@ -37,7 +37,6 @@ use crate::ser::{ProtocolVersion, Readable, Reader, Writeable, Writer};
 use chrono::prelude::{DateTime, Utc};
 use randomx_rs::{RandomXCache, RandomXError, RandomXFlag, RandomXVM};
 use serde::{Deserialize, Serialize};
-use std::convert::TryInto;
 
 pub mod error;
 
@@ -85,8 +84,10 @@ pub fn get_pow_type(_header: &BlockHeader) -> Result<PowType, PowError> {
 /// Creates a new RandomX cache from the given seed (header pre-PoW bytes).
 /// Uses FLAG_DEFAULT for standard CPU-optimized setup (JIT + large pages if available).
 pub fn new_randomx_cache(seed: &[u8]) -> Result<RandomXCache, PowError> {
-	RandomXCache::new(RandomXFlag::FLAG_DEFAULT, seed)
-		.map_err(|e: RandomXError| PowError::CacheInit(format!("RandomXError: {:?}", e)))
+	match RandomXCache::new(RandomXFlag::FLAG_DEFAULT, seed) {
+		Ok(cache) => Ok(cache),
+		Err(e) => Err(PowError::CacheInit(format!("RandomXError: {:?}", e))),
+	}
 }
 
 /// RandomX-specific proof of work
@@ -117,17 +118,25 @@ impl RandomXProofOfWork {
 			.cache
 			.as_ref()
 			.ok_or(PowError::CacheInit("No cache".to_string()))?;
-		let vm = RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache.clone()), None)
-			.map_err(|_: RandomXError| PowError::VMCreate)?;
+		let vm = match RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache.clone()), None) {
+			Ok(vm) => vm,
+			Err(_) => return Err(PowError::VMCreate),
+		};
 		let input = [seed, &self.nonce.to_le_bytes()].concat();
-		let hash_bytes = vm
-			.calculate_hash(&input)
-			.map_err(|_: RandomXError| PowError::HashFail)?;
+		let hash_bytes = match vm.calculate_hash(&input) {
+			Ok(bytes) => bytes,
+			Err(_) => return Err(PowError::HashFail),
+		};
 		drop(vm); // Free VM
 
-		let hash_arr: [u8; 32] = hash_bytes
-			.try_into()
-			.map_err(|_: std::array::TryFromSliceError| PowError::HashFail)?;
+		// Check hash_bytes length
+		if hash_bytes.len() != 32 {
+			return Err(PowError::HashFail);
+		}
+
+		// Copy Vec<u8> into [u8; 32]
+		let mut hash_arr = [0u8; 32];
+		hash_arr.copy_from_slice(&hash_bytes[..32]);
 		let hash_diff = Difficulty::from_hash(hash_arr);
 
 		if hash_diff >= self.total_difficulty {
@@ -172,9 +181,10 @@ impl ProofOfWork for RandomXProofOfWork {
 
 /// Validates the proof of work of a given header (RandomX version).
 pub fn verify_size(bh: &BlockHeader) -> Result<(), crate::core::block::Error> {
-	bh.pow
-		.verify(bh)
-		.map_err(|e: PowError| crate::core::block::Error::Pow(e))
+	match bh.pow.verify(bh) {
+		Ok(()) => Ok(()),
+		Err(e) => Err(crate::core::block::Error::Pow(e)),
+	}
 }
 
 /// Mines a genesis block using the internal miner
@@ -182,8 +192,10 @@ pub fn mine_genesis_block() -> Result<Block, crate::core::block::Error> {
 	let mut gen = genesis::genesis_dev();
 	let genesis_difficulty = Difficulty::min_dma();
 	let seed = gen.header.pre_pow();
-	let pow = global::create_pow_context(gen.header.height, &seed)
-		.map_err(|e: PowError| crate::core::block::Error::Pow(e))?;
+	let pow = match global::create_pow_context(gen.header.height, &seed) {
+		Ok(pow) => pow,
+		Err(e) => return Err(crate::core::block::Error::Pow(e)),
+	};
 	gen.header.pow = pow;
 	pow_size(&mut gen.header, genesis_difficulty)?;
 	Ok(gen)
@@ -198,14 +210,18 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), crate::cor
 	let mut iter = 0;
 	const MAX_ITER: u64 = 1_000_000; // Timeout for tests
 
-	let mut pow = global::create_pow_context(bh.height, &seed)
-		.map_err(|e: PowError| crate::core::block::Error::Pow(e))?;
-	let mut vm = RandomXVM::new(
+	let mut pow = match global::create_pow_context(bh.height, &seed) {
+		Ok(pow) => pow,
+		Err(e) => return Err(crate::core::block::Error::Pow(e)),
+	};
+	let mut vm = match RandomXVM::new(
 		RandomXFlag::FLAG_DEFAULT,
 		Some(pow.cache.clone().unwrap()),
 		None,
-	)
-	.map_err(|e: RandomXError| crate::core::block::Error::Pow(PowError::VMCreate))?;
+	) {
+		Ok(vm) => vm,
+		Err(_) => return Err(crate::core::block::Error::Pow(PowError::VMCreate)),
+	};
 
 	loop {
 		if iter > MAX_ITER {
@@ -214,15 +230,19 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), crate::cor
 
 		// Compute hash for current nonce
 		let input = [seed.as_slice(), &nonce.to_le_bytes()].concat();
-		let hash_bytes = vm
-			.calculate_hash(&input)
-			.map_err(|e: RandomXError| crate::core::block::Error::Pow(PowError::HashFail))?;
-		let hash_arr: [u8; 32] =
-			hash_bytes
-				.try_into()
-				.map_err(|e: std::array::TryFromSliceError| {
-					crate::core::block::Error::Pow(PowError::HashFail)
-				})?;
+		let hash_bytes = match vm.calculate_hash(&input) {
+			Ok(bytes) => bytes,
+			Err(_) => return Err(crate::core::block::Error::Pow(PowError::HashFail)),
+		};
+
+		// Check hash_bytes length
+		if hash_bytes.len() != 32 {
+			return Err(crate::core::block::Error::Pow(PowError::HashFail));
+		}
+
+		// Copy Vec<u8> into [u8; 32]
+		let mut hash_arr = [0u8; 32];
+		hash_arr.copy_from_slice(&hash_bytes[..32]);
 		let hash_diff = Difficulty::from_hash(hash_arr);
 
 		// If valid, set PoW and break
@@ -241,15 +261,19 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), crate::cor
 			bh.timestamp = Utc::now();
 			seed = bh.pre_pow();
 			// Recreate PoW context for new seed
-			pow = global::create_pow_context(bh.height, &seed)
-				.map_err(|e: PowError| crate::core::block::Error::Pow(e))?;
+			pow = match global::create_pow_context(bh.height, &seed) {
+				Ok(pow) => pow,
+				Err(e) => return Err(crate::core::block::Error::Pow(e)),
+			};
 			// Recreate VM with new cache
-			vm = RandomXVM::new(
+			vm = match RandomXVM::new(
 				RandomXFlag::FLAG_DEFAULT,
 				Some(pow.cache.clone().unwrap()),
 				None,
-			)
-			.map_err(|e: RandomXError| crate::core::block::Error::Pow(PowError::VMCreate))?;
+			) {
+				Ok(vm) => vm,
+				Err(_) => return Err(crate::core::block::Error::Pow(PowError::VMCreate)),
+			};
 		}
 
 		iter += 1;
