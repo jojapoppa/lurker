@@ -28,6 +28,10 @@ use grin_util::secp::pedersen::{Commitment, RangeProof};
 use grin_util::secp::Signature;
 use keychain::BlindingFactor;
 
+use crate::core::transaction::Output;
+use crate::core::OutputFeatures;
+use grin_util::from_hex;
+
 /// Genesis block definition for development networks. The proof of work size
 /// is small enough to mine it on the fly, so it does not contain its own
 /// proof of work solution. Can also be easily mutated for different tests.
@@ -102,6 +106,7 @@ pub fn genesis_test() -> core::Block {
 			)
 			.unwrap(),
 		),
+		RangeProof::zero(), // Add this for zero range proof
 	);
 	gen.with_reward(output, kernel)
 }
@@ -148,14 +153,9 @@ pub fn genesis_main() -> core::Block {
 			)
 			.unwrap(),
 		),
-		excess_sig: Signature::from_raw_data(&[
-			80, 208, 41, 171, 28, 224, 250, 121, 60, 192, 213, 232, 111, 199, 111, 105, 18, 22, 54,
-			165, 107, 33, 186, 113, 186, 100, 12, 42, 72, 106, 42, 20, 67, 253, 188, 178, 228, 246,
-			21, 168, 253, 18, 22, 179, 41, 63, 250, 218, 80, 132, 75, 67, 244, 11, 108, 27, 188,
-			251, 212, 166, 233, 103, 117, 237, 194, 102, 96, 205, 24,
-		])
-		.unwrap(),
+		excess_sig: Signature::from_raw_data(&[0u8; 64]).unwrap(),
 	};
+
 	let output = core::Output::new(
 		core::OutputFeatures::Coinbase,
 		Commitment::from_vec(
@@ -164,7 +164,9 @@ pub fn genesis_main() -> core::Block {
 			)
 			.unwrap(),
 		),
+		RangeProof::zero(), // Add this for zero range proof
 	);
+
 	gen.with_reward(output, kernel)
 }
 
