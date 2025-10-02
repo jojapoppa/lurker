@@ -870,9 +870,11 @@ where
 	// we need to go request the block (compact representation) from the
 	// same peer that gave us the header (unless we have already accepted the block)
 	fn request_compact_block(&self, bh: &BlockHeader, peer_info: &PeerInfo) {
-		self.send_block_request_to_peer(bh.hash(), peer_info, |peer, h| {
-			peer.send_compact_block_request(h)
-		})
+		self.send_block_request_to_peer::<crate::core::Block, _>(
+			bh.hash(),
+			peer_info,
+			|peer, h| peer.send_compact_block_request(h),
+		);
 	}
 
 	fn send_tx_request_to_peer<F>(&self, h: Hash, peer_info: &PeerInfo, f: F)

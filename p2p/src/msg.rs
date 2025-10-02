@@ -16,13 +16,13 @@
 
 use crate::chain::txhashset::BitmapSegment;
 use crate::conn::Tracker;
+use crate::core::consensus::Difficulty;
 use crate::core::core::hash::Hash;
 use crate::core::core::transaction::{OutputIdentifier, TxKernel};
 use crate::core::core::{
 	BlockHeader, Segment, SegmentIdentifier, Transaction, UntrustedBlock, UntrustedBlockHeader,
 	UntrustedCompactBlock,
 };
-use crate::core::pow::Difficulty;
 use crate::core::ser::{
 	self, DeserializationMode, ProtocolVersion, Readable, Reader, StreamingReader, Writeable,
 	Writer,

@@ -17,9 +17,9 @@
 use chrono::prelude::{DateTime, Utc};
 use chrono::Duration;
 
+use crate::core::consensus::Difficulty;
 use crate::core::core::hash::{Hash, Hashed, ZERO_HASH};
 use crate::core::core::{pmmr, Block, BlockHeader, HeaderVersion, SegmentTypeIdentifier};
-use crate::core::pow::Difficulty;
 use crate::core::ser::{self, PMMRIndexHashable, Readable, Reader, Writeable, Writer};
 use crate::error::Error;
 use crate::util::{RwLock, RwLockWriteGuard};

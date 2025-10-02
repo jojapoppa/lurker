@@ -32,10 +32,9 @@ use crate::ser::PMMRable; // PMMRable trait lives here, not in pmmr
 use crate::ser::{BinReader, BinWriter, DeserializationMode, ProtocolVersion}; // Update imports
 use std::io::Cursor; // Ensure Cursor is imported
 
-use crate::ser::{self, BinWriter, ProtocolVersion, Readable, Reader, Writeable, Writer};
+use crate::ser::{self, Readable, Reader, Writeable, Writer};
 use crate::ser_multiread;
 use crate::ser_multiwrite;
-use siphasher::siphash24;
 
 use chrono::prelude::{DateTime, Utc};
 use chrono::Duration;
@@ -479,11 +478,10 @@ impl BlockHeader {
 		let mut header = BlockHeader::read(&mut reader)?;
 
 		// Set pow and verify
-		header.pow = RandomXProofOfWork {
-			nonce,
-			total_difficulty: difficulty,
-			cache: None,
-		};
+		let mut pow = RandomXProofOfWork::default();
+		pow.nonce = nonce;
+		pow.total_difficulty = difficulty;
+		header.pow = pow;
 		header
 			.pow
 			.verify(&header.pre_pow())
@@ -765,6 +763,9 @@ impl Block {
 		// Now build the block with all the above information.
 		// Note: We have not validated the block here.
 		// Caller must validate the block as necessary.
+		let mut pow = RandomXProofOfWork::default();
+		pow.nonce = 0; // Initial nonce for mining
+		pow.total_difficulty = difficulty;
 		let block = Block {
 			header: BlockHeader {
 				version,
@@ -772,11 +773,7 @@ impl Block {
 				timestamp,
 				prev_hash: prev.hash(),
 				total_kernel_offset,
-				pow: RandomXProofOfWork {
-					nonce: 0, // Start at 0 for mining
-					total_difficulty: difficulty + prev.total_difficulty(),
-					cache: None,
-				},
+				pow,
 				..Default::default()
 			},
 			body: agg_tx.into(),

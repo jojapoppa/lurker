@@ -26,6 +26,7 @@ use crate::ser::{Readable, Reader, Writeable, Writer};
 use serde::{Deserialize, Serialize};
 use std::cmp::{max, min};
 use std::ops::Add;
+use std::ops::Sub;
 
 /// Errors specific to consensus rules
 #[derive(Debug, thiserror::Error)]
@@ -48,9 +49,6 @@ impl From<PowError> for Error {
 	}
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Difficulty(pub u64);
-
 impl Add for Difficulty {
 	type Output = Self;
 
@@ -60,8 +58,17 @@ impl Add for Difficulty {
 }
 
 /// Difficulty type (adapted for RandomX: u64-based, with hash-to-difficulty conversion)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Difficulty type (adapted for RandomX: u64-based, with hash-to-difficulty conversion)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)] // Consolidated derive
 pub struct Difficulty(pub u64);
+
+impl Sub for Difficulty {
+	type Output = Self;
+
+	fn sub(self, other: Self) -> Self {
+		Difficulty(self.0 - other.0)
+	}
+}
 
 impl Difficulty {
 	/// Zero difficulty

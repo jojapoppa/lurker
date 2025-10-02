@@ -25,7 +25,7 @@ use crate::consensus::{
 
 use crate::core::block::{Block, HeaderVersion};
 use crate::genesis;
-use crate::pow::{new_randomx_cache, Error as PowError, PowType, RandomXProofOfWork};
+use crate::pow::{new_randomx_cache, PowError, PowType, RandomXProofOfWork};
 use crate::ser::ProtocolVersion;
 use grin_util::OneTime;
 use std::cell::Cell;

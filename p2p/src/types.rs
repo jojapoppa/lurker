@@ -27,11 +27,11 @@ use serde::{Deserialize, Deserializer};
 
 use crate::chain;
 use crate::chain::txhashset::BitmapChunk;
+use crate::core::consensus::Difficulty;
 use crate::core::core;
 use crate::core::core::hash::Hash;
 use crate::core::core::{OutputIdentifier, Segment, SegmentIdentifier, TxKernel};
 use crate::core::global;
-use crate::core::pow::Difficulty;
 use crate::core::ser::{self, ProtocolVersion, Readable, Reader, Writeable, Writer};
 use crate::msg::PeerAddrs;
 use crate::util::secp::pedersen::RangeProof;

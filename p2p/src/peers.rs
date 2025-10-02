@@ -22,11 +22,11 @@ use rand::prelude::*;
 
 use crate::chain;
 use crate::chain::txhashset::BitmapChunk;
+use crate::core::consensus::Difficulty;
 use crate::core::core;
 use crate::core::core::hash::{Hash, Hashed};
 use crate::core::core::{OutputIdentifier, Segment, SegmentIdentifier, TxKernel};
 use crate::core::global;
-use crate::core::pow::Difficulty;
 use crate::msg::PeerAddrs;
 use crate::peer::Peer;
 use crate::store::{PeerData, PeerStore, State};

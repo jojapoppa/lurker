@@ -14,11 +14,11 @@
 
 //! Implements storage primitives required by the chain
 
+use crate::core::consensus::Difficulty;
 use crate::core::consensus::HeaderDifficultyInfo;
 use crate::core::core::hash::{Hash, Hashed};
 use crate::core::core::{Block, BlockHeader, BlockSums};
 use crate::core::global;
-use crate::core::pow::Difficulty;
 use crate::core::ser::{DeserializationMode, ProtocolVersion, Readable, Writeable};
 use crate::linked_list::MultiIndex;
 use crate::types::{CommitPos, Tip};

@@ -39,11 +39,7 @@ pub fn genesis_dev() -> core::Block {
 	core::Block::with_header(core::BlockHeader {
 		height: 0,
 		timestamp: Utc.with_ymd_and_hms(1997, 8, 4, 0, 0, 0).unwrap(),
-		pow: RandomXProofOfWork {
-			nonce: 0, // Hardcoded nonce for dev (replace with mined value if needed)
-			total_difficulty: Difficulty::zero(),
-			cache: None,
-		},
+		pow: RandomXProofOfWork::default(),
 		..Default::default()
 	})
 }
@@ -75,11 +71,7 @@ pub fn genesis_test() -> core::Block {
 		.unwrap(),
 		output_mmr_size: 1,
 		kernel_mmr_size: 1,
-		pow: RandomXProofOfWork {
-			nonce: 23, // Hardcoded nonce for testnet
-			total_difficulty: Difficulty::from_num(10_u64.pow(5)),
-			cache: None,
-		},
+		pow: RandomXProofOfWork::default(),
 		..Default::default()
 	});
 	let kernel = core::TxKernel {
@@ -138,11 +130,7 @@ pub fn genesis_main() -> core::Block {
 		.unwrap(),
 		output_mmr_size: 1,
 		kernel_mmr_size: 1,
-		pow: RandomXProofOfWork {
-			nonce: 41, // Hardcoded nonce for mainnet
-			total_difficulty: Difficulty::from_num(2_u64.pow(34)),
-			cache: None,
-		},
+		pow: RandomXProofOfWork::default(),
 		..Default::default()
 	});
 	let kernel = core::TxKernel {
