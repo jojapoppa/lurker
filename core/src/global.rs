@@ -132,39 +132,39 @@ impl Default for ChainTypes {
 }
 
 lazy_static! {
-	/// Global chain_type that must be initialized once on node startup.
-	/// This is accessed via get_chain_type() which allows the global value
-	/// to be overridden on a per-thread basis (for testing).
-	pub static ref GLOBAL_CHAIN_TYPE: OneTime<ChainTypes> = OneTime::new();
+/// Global chain_type that must be initialized once on node startup.
+/// This is accessed via get_chain_type() which allows the global value
+/// to be overridden on a per-thread basis (for testing).
+pub static ref GLOBAL_CHAIN_TYPE: OneTime<ChainTypes> = OneTime::new();
 
-	/// Global acccept fee base that must be initialized once on node startup.
-	/// This is accessed via get_acccept_fee_base() which allows the global value
-	/// to be overridden on a per-thread basis (for testing).
-	pub static ref GLOBAL_ACCEPT_FEE_BASE: OneTime<u64> = OneTime::new();
+/// Global acccept fee base that must be initialized once on node startup.
+/// This is accessed via get_acccept_fee_base() which allows the global value
+/// to be overridden on a per-thread basis (for testing).
+pub static ref GLOBAL_ACCEPT_FEE_BASE: OneTime<u64> = OneTime::new();
 
-	/// Global future time limit that must be initialized once on node startup.
-	/// This is accessed via get_future_time_limit() which allows the global value
-	/// to be overridden on a per-thread basis (for testing).
-	pub static ref GLOBAL_FUTURE_TIME_LIMIT: OneTime<u64> = OneTime::new();
+/// Global future time limit that must be initialized once on node startup.
+/// This is accessed via get_future_time_limit() which allows the global value
+/// to be overridden on a per-thread basis (for testing).
+pub static ref GLOBAL_FUTURE_TIME_LIMIT: OneTime<u64> = OneTime::new();
 
-	/// Global feature flag for NRD kernel support.
-	/// If enabled NRD kernels are treated as valid after HF3 (based on header version).
-	/// If disabled NRD kernels are invalid regardless of header version or block height.
-	pub static ref GLOBAL_NRD_FEATURE_ENABLED: OneTime<bool> = OneTime::new();
+/// Global feature flag for NRD kernel support.
+/// If enabled NRD kernels are treated as valid after HF3 (based on header version).
+/// If disabled NRD kernels are invalid regardless of header version or block height.
+pub static ref GLOBAL_NRD_FEATURE_ENABLED: OneTime<bool> = OneTime::new();
 }
 
 thread_local! {
-	/// Mainnet|Testnet|UserTesting|AutomatedTesting
-	pub static CHAIN_TYPE: Cell<Option<ChainTypes>> = Cell::new(None);
+/// Mainnet|Testnet|UserTesting|AutomatedTesting
+pub static CHAIN_TYPE: Cell<Option<ChainTypes>> = Cell::new(None);
 
-	/// minimum transaction fee per unit of transaction weight for mempool acceptance
-	pub static ACCEPT_FEE_BASE: Cell<Option<u64>> = Cell::new(None);
+/// minimum transaction fee per unit of transaction weight for mempool acceptance
+pub static ACCEPT_FEE_BASE: Cell<Option<u64>> = Cell::new(None);
 
-	/// maximum number of seconds into future for timestamp of block to be acceptable
-	pub static FUTURE_TIME_LIMIT: Cell<Option<u64>> = Cell::new(None);
+/// maximum number of seconds into future for timestamp of block to be acceptable
+pub static FUTURE_TIME_LIMIT: Cell<Option<u64>> = Cell::new(None);
 
-	/// Local feature flag for NRD kernel support.
-	pub static NRD_FEATURE_ENABLED: Cell<Option<bool>> = Cell::new(None);
+/// Local feature flag for NRD kernel support.
+pub static NRD_FEATURE_ENABLED: Cell<Option<bool>> = Cell::new(None);
 }
 
 /// One time initialization of the global chain_type.
@@ -310,19 +310,18 @@ pub fn is_nrd_enabled() -> bool {
 	})
 }
 
-/// Create a RandomX cache context (adapted for RandomX; drops edge_bits/proof_size/max_sols)
-/// Single change point for PoW context init.
+/// Create a RandomX PoW context (adapted for RandomX; drops edge_bits/proof_size/max_sols)
+/// Single change point for PoW context init. For RandomX, just initializes the struct
+/// (cache created on-demand during mining/verification).
 pub fn create_pow_context(
 	height: u64,
-	seed: &[u8], // From BlockHeader::pre_pow()
+	_seed: &[u8], // From BlockHeader::pre_pow(); unused here as cache is on-demand
 ) -> Result<RandomXProofOfWork, PowError> {
 	// For RandomX: Always use DEFAULT flags; version-based if needed later
 	match header_version(height) {
 		HeaderVersion(v) if (1..=3).contains(&v) => Err(PowError::UnsupportedVersion), // Pre-RandomX
 		_ => {
-			// Init cache from seed
-			let cache = new_randomx_cache(seed)?;
-			Ok(RandomXProofOfWork::new(cache)) // Constructor takes cache
+			Ok(RandomXProofOfWork::default()) // No cache needed; init on mining/verif
 		}
 	}
 }

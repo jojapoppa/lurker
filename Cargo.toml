@@ -35,7 +35,7 @@ linefeed = "0.6"
 semver = "0.10"
 rustyline = "6"
 lazy_static = "1"
-grin_util = "5.3.3"
+grin_util = { path = "./util" }
 
 grin_wallet_api = { path = "../lurker-wallet/api", version = "5.4.0-alpha.1" }
 grin_wallet_impls = { path = "../lurker-wallet/impls", version = "5.4.0-alpha.1" }

@@ -211,12 +211,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b41b7ea54a0c9d92199de89e20e58d49f02f8e699814ef3fdf266f6f748d15c7"
-
-[[package]]
-name = "base64"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3441f0f7b02788e948e47f457ca01f1d7e6d92c693bc132c22b087d3141c03ff"
@@ -537,29 +531,13 @@ dependencies = [
 
 [[package]]
 name = "core-foundation"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d24c7a13c43e870e37c1556b74555437870a04514f7685f5b354e090567171"
-dependencies = [
- "core-foundation-sys 0.7.0",
- "libc",
-]
-
-[[package]]
-name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f"
 dependencies = [
- "core-foundation-sys 0.8.7",
+ "core-foundation-sys",
  "libc",
 ]
-
-[[package]]
-name = "core-foundation-sys"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3a71ab494c0b5b860bdc8407ae08978052417070c2ced38573a9157ad75b8ac"
 
 [[package]]
 name = "core-foundation-sys"
@@ -668,15 +646,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d02f3b0da4c6504f86e9cd789d8dbafab48c2321be74e9987593de5a894d93d"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "ct-logs"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d3686f5fa27dbc1d76c751300376e167c5a43387f44bb451fd1c24776e49113"
-dependencies = [
- "sct 0.6.1",
 ]
 
 [[package]]
@@ -1337,59 +1306,35 @@ dependencies = [
 
 [[package]]
 name = "grin_api"
-version = "5.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6443239e75a15c517ce24fe4dd3ef257898ae0224e6b7c993db28794e13ecf3e"
+version = "5.4.0-alpha.0"
 dependencies = [
- "bytes 0.5.6",
+ "async-stream",
+ "bytes 1.10.1",
  "easy-jsonrpc-mw",
  "futures 0.3.31",
- "grin_chain 5.3.3",
- "grin_core 5.3.3",
- "grin_p2p 5.3.3",
- "grin_pool 5.3.3",
- "grin_store 5.3.3",
- "grin_util",
+ "grin_chain",
+ "grin_core",
+ "grin_p2p",
+ "grin_pool",
+ "grin_store",
+ "grin_util 5.4.0-alpha.0",
  "http",
- "hyper 0.13.10",
- "hyper-rustls 0.20.0",
+ "hyper 0.14.32",
+ "hyper-rustls 0.23.2",
  "hyper-timeout",
  "lazy_static",
  "log",
  "regex",
  "ring 0.16.20",
- "rustls 0.17.0",
+ "rustls 0.20.9",
+ "rustls-pemfile",
  "serde",
  "serde_derive",
  "serde_json",
  "thiserror 1.0.69",
- "tokio 0.2.25",
- "tokio-rustls 0.13.1",
+ "tokio 1.47.1",
+ "tokio-rustls 0.23.4",
  "url",
-]
-
-[[package]]
-name = "grin_chain"
-version = "5.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdedcee9e20e0cc8dc1460b37b3951306c774a6aa5788e3f45addc56e60f7fbe"
-dependencies = [
- "bit-vec",
- "bitflags 1.3.2",
- "byteorder",
- "chrono",
- "croaring",
- "enum_primitive",
- "grin_core 5.3.3",
- "grin_keychain 5.3.3",
- "grin_store 5.3.3",
- "grin_util",
- "lazy_static",
- "log",
- "lru-cache",
- "serde",
- "serde_derive",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1402,11 +1347,11 @@ dependencies = [
  "chrono",
  "croaring",
  "enum_primitive",
- "grin_core 5.4.0-alpha.0",
- "grin_keychain 5.4.0-alpha.0",
- "grin_pool 5.4.0-alpha.0",
- "grin_store 5.4.0-alpha.0",
- "grin_util",
+ "grin_core",
+ "grin_keychain",
+ "grin_pool",
+ "grin_store",
+ "grin_util 5.3.3",
  "grin_wallet_util",
  "lazy_static",
  "log",
@@ -1418,33 +1363,6 @@ dependencies = [
 
 [[package]]
 name = "grin_core"
-version = "5.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4fbf242a2a23a6554dd4c430574d2563993cf5f44921f953635e8a177cf2506"
-dependencies = [
- "blake2-rfc",
- "byteorder",
- "bytes 0.5.6",
- "chrono",
- "croaring",
- "enum_primitive",
- "grin_keychain 5.3.3",
- "grin_util",
- "lazy_static",
- "log",
- "lru-cache",
- "num",
- "num-bigint",
- "rand 0.6.5",
- "serde",
- "serde_derive",
- "siphasher 0.3.11",
- "thiserror 1.0.69",
- "zeroize",
-]
-
-[[package]]
-name = "grin_core"
 version = "5.4.0-alpha.0"
 dependencies = [
  "blake2-rfc",
@@ -1453,8 +1371,8 @@ dependencies = [
  "chrono",
  "croaring",
  "enum_primitive",
- "grin_keychain 5.4.0-alpha.0",
- "grin_util",
+ "grin_keychain",
+ "grin_util 5.3.3",
  "grin_wallet_util",
  "lazy_static",
  "log",
@@ -1472,35 +1390,12 @@ dependencies = [
 
 [[package]]
 name = "grin_keychain"
-version = "5.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abeb1c22f48269a0bf463de589f8961d8bbb554def5e5e405710ead9a1b4c71a"
-dependencies = [
- "blake2-rfc",
- "byteorder",
- "digest 0.9.0",
- "grin_util",
- "hmac 0.11.0",
- "lazy_static",
- "log",
- "pbkdf2 0.8.0",
- "rand 0.6.5",
- "ripemd160",
- "serde",
- "serde_derive",
- "serde_json",
- "sha2 0.9.9",
- "zeroize",
-]
-
-[[package]]
-name = "grin_keychain"
 version = "5.4.0-alpha.0"
 dependencies = [
  "blake2-rfc",
  "byteorder",
  "digest 0.9.0",
- "grin_util",
+ "grin_util 5.3.3",
  "grin_wallet_util",
  "hmac 0.11.0",
  "lazy_static",
@@ -1517,39 +1412,16 @@ dependencies = [
 
 [[package]]
 name = "grin_p2p"
-version = "5.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6b0ecc5597244d698ec4e1ea2e7d04c3b209f496db16731a04f06af41572c54"
-dependencies = [
- "bitflags 1.3.2",
- "bytes 0.5.6",
- "chrono",
- "enum_primitive",
- "grin_chain 5.3.3",
- "grin_core 5.3.3",
- "grin_store 5.3.3",
- "grin_util",
- "log",
- "lru-cache",
- "num",
- "rand 0.6.5",
- "serde",
- "serde_derive",
- "tempfile",
-]
-
-[[package]]
-name = "grin_p2p"
 version = "5.4.0-alpha.0"
 dependencies = [
  "bitflags 1.3.2",
  "bytes 0.5.6",
  "chrono",
  "enum_primitive",
- "grin_chain 5.4.0-alpha.0",
- "grin_core 5.4.0-alpha.0",
- "grin_store 5.4.0-alpha.0",
- "grin_util",
+ "grin_chain",
+ "grin_core",
+ "grin_store",
+ "grin_util 5.3.3",
  "grin_wallet_util",
  "log",
  "lru-cache",
@@ -1562,31 +1434,13 @@ dependencies = [
 
 [[package]]
 name = "grin_pool"
-version = "5.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14b758b202f034a03b894e732c716ddece8994fae5d8da1e074b1a9e07219f2b"
-dependencies = [
- "blake2-rfc",
- "chrono",
- "grin_core 5.3.3",
- "grin_keychain 5.3.3",
- "grin_util",
- "log",
- "rand 0.6.5",
- "serde",
- "serde_derive",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "grin_pool"
 version = "5.4.0-alpha.0"
 dependencies = [
  "blake2-rfc",
  "chrono",
- "grin_core 5.4.0-alpha.0",
- "grin_keychain 5.4.0-alpha.0",
- "grin_util",
+ "grin_core",
+ "grin_keychain",
+ "grin_util 5.3.3",
  "grin_wallet_util",
  "log",
  "rand 0.6.5",
@@ -1618,12 +1472,12 @@ dependencies = [
  "chrono",
  "fs2",
  "futures 0.3.31",
- "grin_chain 5.4.0-alpha.0",
- "grin_core 5.4.0-alpha.0",
- "grin_keychain 5.4.0-alpha.0",
- "grin_p2p 5.4.0-alpha.0",
- "grin_pool 5.4.0-alpha.0",
- "grin_store 5.4.0-alpha.0",
+ "grin_chain",
+ "grin_core",
+ "grin_keychain",
+ "grin_p2p",
+ "grin_pool",
+ "grin_store",
  "grin_wallet_api",
  "grin_wallet_util",
  "http",
@@ -1643,32 +1497,12 @@ dependencies = [
 
 [[package]]
 name = "grin_store"
-version = "5.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "708e53758263fa17dfd3fc46419ded59a84d07818e1ee7526b0d47ba268f1362"
-dependencies = [
- "byteorder",
- "croaring",
- "grin_core 5.3.3",
- "grin_util",
- "libc",
- "lmdb-zero",
- "log",
- "memmap",
- "serde",
- "serde_derive",
- "tempfile",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "grin_store"
 version = "5.4.0-alpha.0"
 dependencies = [
  "byteorder",
  "croaring",
- "grin_core 5.4.0-alpha.0",
- "grin_util",
+ "grin_core",
+ "grin_util 5.3.3",
  "grin_wallet_util",
  "libc",
  "lmdb-zero",
@@ -1704,20 +1538,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "grin_util"
+version = "5.4.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "backtrace",
+ "base64 0.12.3",
+ "byteorder",
+ "grin_secp256k1zkp",
+ "lazy_static",
+ "log",
+ "log4rs",
+ "parking_lot 0.10.2",
+ "rand 0.6.5",
+ "serde",
+ "serde_derive",
+ "walkdir",
+ "zeroize",
+ "zip",
+]
+
+[[package]]
 name = "grin_wallet"
 version = "5.4.0-alpha.1"
 dependencies = [
  "built",
  "clap",
  "easy-jsonrpc-mw",
- "grin_chain 5.4.0-alpha.0",
- "grin_core 5.4.0-alpha.0",
- "grin_keychain 5.4.0-alpha.0",
- "grin_p2p 5.4.0-alpha.0",
- "grin_pool 5.4.0-alpha.0",
+ "grin_chain",
+ "grin_core",
+ "grin_keychain",
+ "grin_p2p",
+ "grin_pool",
  "grin_servers",
- "grin_store 5.4.0-alpha.0",
- "grin_util",
+ "grin_store",
+ "grin_util 5.4.0-alpha.0",
  "grin_wallet_api",
  "grin_wallet_config",
  "grin_wallet_controller",
@@ -1750,9 +1605,9 @@ dependencies = [
  "chrono",
  "easy-jsonrpc-mw",
  "ed25519-dalek 1.0.1",
- "grin_core 5.3.3",
- "grin_keychain 5.3.3",
- "grin_util",
+ "grin_core",
+ "grin_keychain",
+ "grin_util 5.4.0-alpha.0",
  "grin_wallet_config",
  "grin_wallet_impls",
  "grin_wallet_libwallet",
@@ -1771,8 +1626,8 @@ name = "grin_wallet_config"
 version = "5.4.0-alpha.1"
 dependencies = [
  "dirs 2.0.2",
- "grin_core 5.3.3",
- "grin_util",
+ "grin_core",
+ "grin_util 5.4.0-alpha.0",
  "grin_wallet_util",
  "rand 0.6.5",
  "serde",
@@ -1788,9 +1643,10 @@ dependencies = [
  "easy-jsonrpc-mw",
  "futures 0.3.31",
  "grin_api",
- "grin_core 5.3.3",
- "grin_keychain 5.3.3",
- "grin_util",
+ "grin_chain",
+ "grin_core",
+ "grin_keychain",
+ "grin_util 5.4.0-alpha.0",
  "grin_wallet_api",
  "grin_wallet_config",
  "grin_wallet_impls",
@@ -1825,11 +1681,11 @@ dependencies = [
  "ed25519-dalek 1.0.1",
  "futures 0.3.31",
  "grin_api",
- "grin_chain 5.3.3",
- "grin_core 5.3.3",
- "grin_keychain 5.3.3",
- "grin_store 5.3.3",
- "grin_util",
+ "grin_chain",
+ "grin_core",
+ "grin_keychain",
+ "grin_store",
+ "grin_util 5.4.0-alpha.0",
  "grin_wallet_config",
  "grin_wallet_libwallet",
  "grin_wallet_util",
@@ -1866,10 +1722,10 @@ dependencies = [
  "chrono",
  "curve25519-dalek 2.1.3",
  "ed25519-dalek 1.0.1",
- "grin_core 5.3.3",
- "grin_keychain 5.3.3",
- "grin_store 5.3.3",
- "grin_util",
+ "grin_core",
+ "grin_keychain",
+ "grin_store",
+ "grin_util 5.4.0-alpha.0",
  "grin_wallet_config",
  "grin_wallet_util",
  "hmac 0.12.1",
@@ -1899,7 +1755,7 @@ version = "5.4.0-alpha.1"
 dependencies = [
  "data-encoding",
  "ed25519-dalek 1.0.1",
- "grin_util",
+ "grin_util 5.3.3",
  "rand 0.6.5",
  "serde",
  "serde_derive",
@@ -2129,24 +1985,6 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac965ea399ec3a25ac7d13b8affd4b8f39325cca00858ddf5eb29b79e6b14b08"
-dependencies = [
- "bytes 0.5.6",
- "ct-logs",
- "futures-util",
- "hyper 0.13.10",
- "log",
- "rustls 0.17.0",
- "rustls-native-certs 0.3.0",
- "tokio 0.2.25",
- "tokio-rustls 0.13.1",
- "webpki 0.21.4",
-]
-
-[[package]]
-name = "hyper-rustls"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37743cc83e8ee85eacfce90f2f4102030d9ff0a95244098d781e9bee4a90abb6"
@@ -2171,20 +2009,20 @@ dependencies = [
  "hyper 0.14.32",
  "log",
  "rustls 0.20.9",
- "rustls-native-certs 0.6.3",
+ "rustls-native-certs",
  "tokio 1.47.1",
  "tokio-rustls 0.23.4",
 ]
 
 [[package]]
 name = "hyper-timeout"
-version = "0.3.1"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d1f9b0b8258e3ef8f45928021d3ef14096c2b93b99e4b8cfcabf1f58ec84b0a"
+checksum = "bbb958482e8c7be4bc3cf272a766a2b0bf1a6755e7a6ae777f017a31d11b13b1"
 dependencies = [
- "bytes 0.5.6",
- "hyper 0.13.10",
- "tokio 0.2.25",
+ "hyper 0.14.32",
+ "pin-project-lite 0.2.16",
+ "tokio 1.47.1",
  "tokio-io-timeout",
 ]
 
@@ -2277,7 +2115,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33e57f83510bb73707521ebaffa789ec8caf86f9657cad665b092b581d40e9fb"
 dependencies = [
  "android_system_properties",
- "core-foundation-sys 0.8.7",
+ "core-foundation-sys",
  "iana-time-zone-haiku",
  "js-sys",
  "log",
@@ -2889,8 +2727,8 @@ dependencies = [
  "openssl-probe",
  "openssl-sys",
  "schannel",
- "security-framework 2.11.1",
- "security-framework-sys 2.15.0",
+ "security-framework",
+ "security-framework-sys",
  "tempfile",
 ]
 
@@ -3938,19 +3776,6 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0d4a31f5d68413404705d6982529b0e11a9aacd4839d1d6222ee3b8cb4015e1"
-dependencies = [
- "base64 0.11.0",
- "log",
- "ring 0.16.20",
- "sct 0.6.1",
- "webpki 0.21.4",
-]
-
-[[package]]
-name = "rustls"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d1126dcf58e93cee7d098dbda643b5f92ed724f1f6a63007c1116eed6700c81"
@@ -3976,18 +3801,6 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a75ffeb84a6bd9d014713119542ce415db3a3e4748f0bfce1e1416cd224a23a5"
-dependencies = [
- "openssl-probe",
- "rustls 0.17.0",
- "schannel",
- "security-framework 0.4.4",
-]
-
-[[package]]
-name = "rustls-native-certs"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
@@ -3995,7 +3808,7 @@ dependencies = [
  "openssl-probe",
  "rustls-pemfile",
  "schannel",
- "security-framework 2.11.1",
+ "security-framework",
 ]
 
 [[package]]
@@ -4129,38 +3942,15 @@ dependencies = [
 
 [[package]]
 name = "security-framework"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64808902d7d99f78eaddd2b4e2509713babc3dc3c85ad6f4c447680f3c01e535"
-dependencies = [
- "bitflags 1.3.2",
- "core-foundation 0.7.0",
- "core-foundation-sys 0.7.0",
- "libc",
- "security-framework-sys 0.4.3",
-]
-
-[[package]]
-name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
  "bitflags 2.9.4",
- "core-foundation 0.9.4",
- "core-foundation-sys 0.8.7",
+ "core-foundation",
+ "core-foundation-sys",
  "libc",
- "security-framework-sys 2.15.0",
-]
-
-[[package]]
-name = "security-framework-sys"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17bf11d99252f512695eb468de5516e5cf75455521e69dfe343f3b74e4748405"
-dependencies = [
- "core-foundation-sys 0.7.0",
- "libc",
+ "security-framework-sys",
 ]
 
 [[package]]
@@ -4169,7 +3959,7 @@ version = "2.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc1f0cbffaac4852523ce30d8bd3c5cdc873501d96ff467ca09b6767bb8cd5c0"
 dependencies = [
- "core-foundation-sys 0.8.7",
+ "core-foundation-sys",
  "libc",
 ]
 
@@ -4545,7 +4335,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd727fc423c2060f6c92d9534cef765c65a6ed3f428a03d7def74a8c4348e666"
 dependencies = [
  "cfg-if 1.0.3",
- "core-foundation-sys 0.8.7",
+ "core-foundation-sys",
  "libc",
  "ntapi",
  "once_cell",
@@ -4739,12 +4529,12 @@ dependencies = [
 
 [[package]]
 name = "tokio-io-timeout"
-version = "0.4.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9390a43272c8a6ac912ed1d1e2b6abeafd5047e05530a2fa304deee041a06215"
+checksum = "0bd86198d9ee903fedd2f9a2e72014287c0d9167e4ae43b5853007205dda1b76"
 dependencies = [
- "bytes 0.5.6",
- "tokio 0.2.25",
+ "pin-project-lite 0.2.16",
+ "tokio 1.47.1",
 ]
 
 [[package]]
@@ -4767,18 +4557,6 @@ dependencies = [
  "proc-macro2 1.0.101",
  "quote 1.0.41",
  "syn 2.0.106",
-]
-
-[[package]]
-name = "tokio-rustls"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15cb62a0d2770787abc96e99c1cd98fcf17f94959f3af63ca85bdfb203f051b4"
-dependencies = [
- "futures-core",
- "rustls 0.17.0",
- "tokio 0.2.25",
- "webpki 0.21.4",
 ]
 
 [[package]]

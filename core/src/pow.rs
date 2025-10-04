@@ -12,15 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The proof of work needs to strike a balance between fast header
-//! verification to avoid DoS attacks and difficulty for block verifiers to
-//! build new blocks. In addition, mining new blocks should also be as
-//! difficult on high end custom-made hardware (ASICs) as on commodity hardware
-//! or smartphones. For this reason we use RandomX (as it is also Quantum Resistant as well)
-//!
-//! Note that this miner implementation is here mostly for tests and
-//! reference. It's not optimized for speed.
-
 #![deny(non_upper_case_globals)]
 #![deny(non_camel_case_types)]
 #![deny(non_snake_case)]
@@ -88,8 +79,8 @@ pub fn new_randomx_cache(seed: &[u8]) -> Result<RandomXCache, PowError> {
 	}
 }
 
-/// RandomX-specific proof of work
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// RandomX-specific proof of work (primitives only; no cache for Sync/Send)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RandomXProofOfWork {
 	/// The nonce
 	pub nonce: u64,
@@ -97,18 +88,7 @@ pub struct RandomXProofOfWork {
 	pub total_difficulty: Difficulty,
 	/// Legacy secondary scaling (stubbed to 0 for RandomX; no secondary PoW)
 	pub secondary_scaling: u32,
-	/// Internal cache (for reuse in mining/verif; not serialized)
-	#[serde(skip)]
-	cache: Option<RandomXCache>,
 }
-
-impl PartialEq for RandomXProofOfWork {
-	fn eq(&self, other: &Self) -> bool {
-		self.nonce == other.nonce && self.total_difficulty == other.total_difficulty
-	}
-}
-
-impl Eq for RandomXProofOfWork {}
 
 impl RandomXProofOfWork {
 	/// Stub for RandomX: Always primary (no secondary PoW)
@@ -121,23 +101,11 @@ impl RandomXProofOfWork {
 		false
 	}
 
-	/// Creates a new RandomX PoW instance from cache (for mining/verif).
-	pub fn new(cache: RandomXCache) -> Self {
-		Self {
-			cache: Some(cache),
-			nonce: 0,
-			total_difficulty: Difficulty::zero(),
-			secondary_scaling: 0, // Stub for legacy code
-		}
-	}
-
 	/// Verifies the PoW by computing hash(seed + nonce) and checking against difficulty target.
+	/// Recreates cache from seed for verification (no stored cache).
 	pub fn verify_internal(&self, seed: &[u8]) -> Result<(), PowError> {
-		let cache = self
-			.cache
-			.as_ref()
-			.ok_or(PowError::CacheInit("No cache".to_string()))?;
-		let vm = match RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache.clone()), None) {
+		let cache = new_randomx_cache(seed)?;
+		let vm = match RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache), None) {
 			Ok(vm) => vm,
 			Err(_) => return Err(PowError::VMCreate),
 		};
@@ -181,8 +149,7 @@ impl Default for RandomXProofOfWork {
 		Self {
 			nonce: 0,
 			total_difficulty: Difficulty::zero(),
-			secondary_scaling: 0, // Stub for legacy code
-			cache: None,
+			secondary_scaling: 0,
 		}
 	}
 }
@@ -191,12 +158,11 @@ impl Readable for RandomXProofOfWork {
 	fn read<R: Reader>(reader: &mut R) -> Result<Self, crate::ser::Error> {
 		let nonce = reader.read_u64()?;
 		let total_difficulty = Difficulty::read(reader)?;
-		let secondary_scaling = reader.read_u32()?; // Read legacy field
+		let secondary_scaling = reader.read_u32()?;
 		Ok(Self {
 			nonce,
 			total_difficulty,
 			secondary_scaling,
-			cache: None,
 		})
 	}
 }
@@ -205,15 +171,15 @@ impl Writeable for RandomXProofOfWork {
 	fn write<W: Writer>(&self, writer: &mut W) -> Result<(), crate::ser::Error> {
 		writer.write_u64(self.nonce)?;
 		self.total_difficulty.write(writer)?;
-		writer.write_u32(self.secondary_scaling)?; // Write legacy field
+		writer.write_u32(self.secondary_scaling)?;
 		Ok(())
 	}
 }
 
 impl ProofOfWork for RandomXProofOfWork {
 	fn size(&self) -> usize {
-		8 + 8 // nonce (u64) + difficulty (u64)
-	}
+		8 + 8
+	} // nonce (u64) + difficulty (u64)
 
 	fn verify(&self, seed: &[u8]) -> Result<(), PowError> {
 		self.verify_internal(seed)
@@ -232,15 +198,7 @@ pub fn verify_size(bh: &BlockHeader) -> Result<(), crate::core::block::Error> {
 pub fn mine_genesis_block() -> Result<Block, crate::core::block::Error> {
 	let mut gen = genesis::genesis_dev();
 	let genesis_difficulty = Difficulty::min_dma();
-	let seed = gen.header.pre_pow();
-	let pow = match global::create_pow_context(gen.header.height, &seed) {
-		Ok(pow) => pow,
-		Err(e) => {
-			let error = crate::core::block::Error::Pow(e);
-			return Err(error);
-		}
-	};
-	gen.header.pow = pow;
+	gen.header.pow = RandomXProofOfWork::default();
 	pow_size(&mut gen.header, genesis_difficulty)?;
 	Ok(gen)
 }
@@ -254,23 +212,11 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), crate::cor
 	let mut iter = 0;
 	const MAX_ITER: u64 = 1_000_000; // Timeout for tests
 
-	let mut pow = match global::create_pow_context(bh.height, &seed) {
-		Ok(pow) => pow,
-		Err(e) => {
-			let error = crate::core::block::Error::Pow(e);
-			return Err(error);
-		}
-	};
-	let mut vm = match RandomXVM::new(
-		RandomXFlag::FLAG_DEFAULT,
-		Some(pow.cache.clone().unwrap()),
-		None,
-	) {
+	// Create cache locally for mining (not stored in header)
+	let mut cache = new_randomx_cache(&seed).map_err(|e| crate::core::block::Error::Pow(e))?;
+	let mut vm = match RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache.clone()), None) {
 		Ok(vm) => vm,
-		Err(_) => {
-			let error = crate::core::block::Error::Pow(PowError::VMCreate);
-			return Err(error);
-		}
+		Err(_) => return Err(crate::core::block::Error::Pow(PowError::VMCreate)),
 	};
 
 	loop {
@@ -282,10 +228,7 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), crate::cor
 		let input = [seed.as_slice(), &nonce.to_le_bytes()].concat();
 		let hash_bytes = match vm.calculate_hash(&input) {
 			Ok(bytes) => bytes,
-			Err(_) => {
-				let error = crate::core::block::Error::Pow(PowError::HashFail);
-				return Err(error);
-			}
+			Err(_) => return Err(crate::core::block::Error::Pow(PowError::HashFail)),
 		};
 
 		// Check hash_bytes length
@@ -302,36 +245,20 @@ pub fn pow_size(bh: &mut BlockHeader, diff: Difficulty) -> Result<(), crate::cor
 		if hash_diff >= diff {
 			bh.pow.nonce = nonce;
 			bh.pow.total_difficulty = hash_diff;
-			bh.pow.cache = pow.cache.take(); // Store cache
 			return Ok(());
 		}
 
 		// Increment nonce
 		nonce = nonce.overflowing_add(1).0;
 
-		// If nonce wraps, update timestamp (changes seed)
+		// If nonce wraps, update timestamp (changes seed) and recreate cache/VM
 		if nonce == start_nonce {
 			bh.timestamp = Utc::now();
 			seed = bh.pre_pow();
-			// Recreate PoW context for new seed
-			pow = match global::create_pow_context(bh.height, &seed) {
-				Ok(pow) => pow,
-				Err(e) => {
-					let error = crate::core::block::Error::Pow(e);
-					return Err(error);
-				}
-			};
-			// Recreate VM with new cache
-			vm = match RandomXVM::new(
-				RandomXFlag::FLAG_DEFAULT,
-				Some(pow.cache.clone().unwrap()),
-				None,
-			) {
+			cache = new_randomx_cache(&seed).map_err(|e| crate::core::block::Error::Pow(e))?;
+			vm = match RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache.clone()), None) {
 				Ok(vm) => vm,
-				Err(_) => {
-					let error = crate::core::block::Error::Pow(PowError::VMCreate);
-					return Err(error);
-				}
+				Err(_) => return Err(crate::core::block::Error::Pow(PowError::VMCreate)),
 			};
 		}
 
@@ -357,6 +284,7 @@ mod test {
 		global::set_local_chain_type(ChainTypes::UserTesting);
 
 		let mut b = genesis::genesis_dev();
+		b.header.pow = RandomXProofOfWork::default();
 		b.header.pow.nonce = 0; // Start from 0
 
 		pow_size(&mut b.header, Difficulty::min_dma()).unwrap();
