@@ -18,11 +18,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::common::adapters::DandelionAdapter;
 use crate::core::core::hash::Hashed;
 use crate::core::core::transaction;
 use crate::pool::{BlockChain, DandelionConfig, Pool, PoolEntry, PoolError, TxSource};
 use crate::util::StopState;
+use crate::DandelionAdapter;
 use crate::ServerTxPool;
 
 /// A process to monitor transactions in the stempool.

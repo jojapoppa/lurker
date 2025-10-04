@@ -17,7 +17,9 @@ use std::convert::From;
 use std::sync::Arc;
 
 use chrono::prelude::Utc;
+use log::info;
 use rand::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::api;
 use crate::chain;
@@ -44,8 +46,8 @@ pub enum Error {
 	P2P(p2p::Error),
 	/// Error originating from HTTP API calls.
 	API(api::Error),
-	/// Error originating from the cuckoo miner
-	Cuckoo(pow::Error),
+	/// Error originating from the pow miner
+	PoW(pow::Error),
 	/// Error originating from the transaction pool.
 	Pool(pool::PoolError),
 	/// Error originating from the keychain.
@@ -67,25 +69,22 @@ impl From<core::block::Error> for Error {
 		Error::Core(e)
 	}
 }
+
 impl From<chain::Error> for Error {
 	fn from(e: chain::Error) -> Error {
 		Error::Chain(e)
 	}
 }
+
 impl From<std::io::Error> for Error {
 	fn from(e: std::io::Error) -> Error {
 		Error::IOError(e)
 	}
 }
+
 impl From<p2p::Error> for Error {
 	fn from(e: p2p::Error) -> Error {
 		Error::P2P(e)
-	}
-}
-
-impl From<pow::Error> for Error {
-	fn from(e: pow::Error) -> Error {
-		Error::Cuckoo(e)
 	}
 }
 
@@ -359,9 +358,9 @@ impl DandelionEpoch {
 		// If stem_probability == 90 then we stem 90% of the time.
 		let stem_probability = self.config.stem_probability;
 		let mut rng = rand::thread_rng();
-		self.is_stem = rng.gen_range(0, 100) < stem_probability;
+		self.is_stem = rng.gen_range(0..100) < stem_probability as u32;
 
-		let addr = self.relay_peer.clone().map(|p| p.info.addr);
+		let addr = self.relay_peer.as_ref().map(|p| p.info.addr.clone());
 		info!(
 			"DandelionEpoch: next_epoch: is_stem: {} ({}%), relay: {:?}",
 			self.is_stem, stem_probability, addr
@@ -398,7 +397,7 @@ impl DandelionEpoch {
 			self.relay_peer = peers.iter().outbound().connected().choose_random();
 			info!(
 				"DandelionEpoch: relay_peer: new peer chosen: {:?}",
-				self.relay_peer.clone().map(|p| p.info.addr)
+				self.relay_peer.as_ref().map(|p| p.info.addr.clone())
 			);
 		}
 

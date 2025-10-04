@@ -11,7 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+//
+//! Networking code to connect to other peers and exchange block, transactions,
+//! etc.
+//
 //! Networking code to connect to other peers and exchange block, transactions,
 //! etc.
 
@@ -56,3 +59,24 @@ pub use crate::types::{
 	Capabilities, ChainAdapter, Direction, Error, P2PConfig, PeerAddr, PeerInfo, ReasonForBan,
 	Seeding, TxHashSetRead, MAX_BLOCK_HEADERS, MAX_LOCATORS, MAX_PEER_ADDRS,
 };
+
+use grin_core::core::hash::Hash;
+use grin_core::core::{Block, BlockHeader};
+
+/// Trait for providing chain data to the p2p layer.
+pub trait BlockChain {
+	/// Get current chain head.
+	fn chain_head(&self) -> Result<BlockHeader, Error>;
+
+	/// Get a block by hash.
+	fn get_block(&self, hash: &Hash) -> Result<Block, Error>;
+
+	/// Get a block header by hash.
+	fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, Error>;
+
+	/// Get header by height.
+	fn get_header_by_height(&self, height: u64) -> Result<BlockHeader, Error>;
+
+	/// Get block hash by height.
+	fn get_block_id_by_height(&self, height: u64) -> Result<Hash, Error>;
+}

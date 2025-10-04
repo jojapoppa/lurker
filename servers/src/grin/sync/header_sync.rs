@@ -18,8 +18,8 @@ use std::sync::Arc;
 
 use crate::chain::{self, SyncState, SyncStatus};
 use crate::common::types::Error;
+use crate::core::consensus::Difficulty;
 use crate::core::core::hash::Hash;
-use crate::core::pow::Difficulty;
 use crate::p2p::{self, types::ReasonForBan, Capabilities, Peer};
 
 pub struct HeaderSync {
@@ -143,11 +143,11 @@ impl HeaderSync {
 									error!("failed to ban peer {}: {:?}", peer.info.addr, e);
 								}
 								info!(
-										"sync: ban a fraud peer: {}, claimed height: {}, total difficulty: {}",
-										peer.info.addr,
-										peer.info.height(),
-										peer.info.total_difficulty(),
-									);
+									"sync: ban a fraud peer: {}, claimed height: {}, total difficulty: {}",
+									peer.info.addr,
+									peer.info.height(),
+									peer.info.total_difficulty(),
+								);
 							}
 						}
 						_ => (),

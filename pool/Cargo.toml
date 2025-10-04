@@ -20,7 +20,9 @@ chrono = "0.4.11"
 grin_util = "5.3.3"
 
 grin_core = { path = "../core", version = "5.4.0-alpha.0" }
+grin_p2p = { path = "../p2p", version = "5.4.0-alpha.0" }
 grin_keychain = { path = "../keychain", version = "5.4.0-alpha.0" }
+
 grin_wallet_util = { path = "../../lurker-wallet/util", version = "5.4.0-alpha.0" }
 
 [dev-dependencies]

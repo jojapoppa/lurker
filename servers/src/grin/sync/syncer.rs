@@ -17,8 +17,8 @@ use std::thread;
 use std::time;
 
 use crate::chain::{self, SyncState, SyncStatus};
+use crate::core::consensus::Difficulty;
 use crate::core::global;
-use crate::core::pow::Difficulty;
 use crate::grin::sync::body_sync::BodySync;
 use crate::grin::sync::header_sync::HeaderSync;
 use crate::grin::sync::state_sync::StateSync;
@@ -111,16 +111,17 @@ impl SyncRunner {
 	/// Starts the syncing loop, just spawns two threads that loop forever
 	fn sync_loop(&self) {
 		macro_rules! unwrap_or_restart_loop(
-	($obj: expr) =>(
-		match $obj {
-			Ok(v) => v,
-			Err(e) => {
-				error!("unexpected error: {:?}", e);
-				thread::sleep(time::Duration::from_secs(1));
-				continue;
-			},
-		}
-	));
+			($obj: expr) => (
+				match $obj {
+					Ok(v) => v,
+					Err(e) => {
+						error!("unexpected error: {:?}", e);
+						thread::sleep(time::Duration::from_secs(1));
+						continue;
+					},
+				}
+			)
+		);
 
 		// Wait for connections reach at least MIN_PEERS
 		if let Err(e) = self.wait_for_min_peers() {

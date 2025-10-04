@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+//
 //! Seeds a server with initial peers on first start and keep monitoring
-//! peer counts to connect to more if neeed. Seedin strategy is
+//! peer counts to connect to more if needed. Seeding strategy is
 //! configurable with either no peers, a user-defined list or a preset
 //! list of DNS records (the default).
 
@@ -26,8 +26,8 @@ use std::net::ToSocketAddrs;
 use std::sync::{mpsc, Arc};
 use std::{cmp, str, thread, time};
 
+use crate::core::consensus::Difficulty;
 use crate::core::global;
-use crate::core::pow::Difficulty;
 use crate::p2p;
 use crate::p2p::types::PeerAddr;
 use crate::p2p::ChainAdapter;
@@ -42,6 +42,7 @@ pub const MAINNET_DNS_SEEDS: &[&str] = &[
 	"mainnet.grin.punksec.de",         // grin@punksec.de
 	"grinnode.30-r.com",               // trinitron@30-r.com
 ];
+
 /// DNS Seeds with contact email associated - Testnet
 pub const TESTNET_DNS_SEEDS: &[&str] = &[
 	"floonet.seed.grin.lesceller.com", // q.lesceller@gmail.com
@@ -167,7 +168,7 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 
 	debug!(
 		"monitor_peers: on {}:{}, {} connected ({} most_work). \
-		 all {} = {} healthy + {} banned + {} defunct",
+		all {} = {} healthy + {} banned + {} defunct",
 		config.host,
 		config.port,
 		peers_count,
@@ -343,7 +344,7 @@ fn listen_for_addrs(
 			.name("peer_connect".to_string())
 			.spawn(move || match p2p_c.connect(addr) {
 				Ok(p) => {
-					// If peer advertizes PEER_LIST then ask it for more peers that support PEER_LIST.
+					// If peer advertises PEER_LIST then ask it for more peers that support PEER_LIST.
 					// We want to build a local db of possible peers to connect to.
 					// We do not necessarily care (at this point in time) what other capabilities these peers support.
 					if p.info.capabilities.contains(p2p::Capabilities::PEER_LIST) {

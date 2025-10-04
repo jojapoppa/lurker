@@ -170,12 +170,15 @@ impl Server {
 		};
 
 		let pool_adapter = Arc::new(PoolToChainAdapter::new());
-		let pool_net_adapter = Arc::new(PoolToNetAdapter::new(config.dandelion_config.clone()));
+
+		let pool_adapter = Arc::new(PoolToChainAdapter::new());
 		let tx_pool = Arc::new(RwLock::new(pool::TransactionPool::new(
 			config.pool_config.clone(),
 			pool_adapter.clone(),
-			pool_net_adapter.clone(),
+			// Placeholder for pool_net_adapter; we'll set it after
+			Arc::new(PoolToNetAdapter::dummy()), // Temp dummy if needed, but better to reorder
 		)));
+		let pool_net_adapter = Arc::new(PoolToNetAdapter::new(tx_pool.clone()));
 
 		let sync_state = Arc::new(SyncState::new());
 

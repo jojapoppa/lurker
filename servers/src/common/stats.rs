@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+//
 //! Server stat collection types, to be used by tests, logging or GUI/TUI
 //! to collect information about server status
 
@@ -27,7 +27,7 @@ use chrono::prelude::*;
 use crate::chain::SyncStatus;
 use crate::p2p;
 use crate::p2p::Capabilities;
-use grin_core::pow::Difficulty;
+use grin_core::consensus::Difficulty;
 
 /// Server state info collection struct, to be passed around into internals
 /// and populated when required
@@ -44,6 +44,7 @@ impl Default for ServerStateInfo {
 		}
 	}
 }
+
 /// Simpler thread-unaware version of above to be populated and returned to
 /// consumers might be interested in, such as test results or UI
 #[derive(Debug, Clone)]
@@ -80,6 +81,7 @@ pub struct ChainStats {
 	/// Timestamp of highest block or header
 	pub latest_timestamp: DateTime<Utc>,
 }
+
 /// Transaction Statistics
 #[derive(Clone, Serialize, Debug)]
 pub struct TxStats {
@@ -92,6 +94,7 @@ pub struct TxStats {
 	/// Number of transaction kernels in the stem pool
 	pub stem_pool_kernels: usize,
 }
+
 /// Struct to return relevant information about stratum workers
 #[derive(Clone, Serialize, Debug)]
 pub struct WorkerStats {

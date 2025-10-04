@@ -17,9 +17,9 @@ use chrono::Duration;
 use std::sync::Arc;
 
 use crate::chain::{self, pibd_params, SyncState, SyncStatus};
+use crate::core::consensus::Difficulty;
 use crate::core::core::{hash::Hashed, pmmr::segment::SegmentType};
 use crate::core::global;
-use crate::core::pow::Difficulty;
 use crate::p2p::{self, Capabilities, Peer};
 use crate::util::StopState;
 
@@ -81,8 +81,12 @@ impl StateSync {
 		highest_height: u64,
 		stop_state: Arc<StopState>,
 	) -> bool {
-		trace!("state_sync: head.height: {}, tail.height: {}. header_head.height: {}, highest_height: {}",
-			   head.height, tail.height, header_head.height, highest_height,
+		trace!(
+			"state_sync: head.height: {}, tail.height: {}. header_head.height: {}, highest_height: {}",
+			head.height,
+			tail.height,
+			header_head.height,
+			highest_height,
 		);
 
 		let mut sync_need_restart = false;
@@ -123,21 +127,6 @@ impl StateSync {
 				self.sync_state
 					.update_pibd_progress(false, false, 0, 1, &archive_header);
 				sync_need_restart = true;
-			}
-		}
-
-		// check peer connection status of this sync
-		if !using_pibd {
-			if let Some(ref peer) = self.state_sync_peer {
-				if let SyncStatus::TxHashsetDownload { .. } = self.sync_state.status() {
-					if !peer.is_connected() {
-						sync_need_restart = true;
-						info!(
-							"state_sync: peer connection lost: {:?}. restart",
-							peer.info.addr,
-						);
-					}
-				}
 			}
 		}
 

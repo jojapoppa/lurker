@@ -25,7 +25,6 @@ lazy_static = "1"
 grin_util = "5.3.3"
 
 grin_core = { path = "../core", version = "5.4.0-alpha.0" }
-grin_pool = { path = "../pool", version = "5.4.0-alpha.0" }
 grin_keychain = { path = "../keychain", version = "5.4.0-alpha.0" }
 grin_store = { path = "../store", version = "5.4.0-alpha.0" }
 grin_wallet_util = { path = "../../lurker-wallet/util" }

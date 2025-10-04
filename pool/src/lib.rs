@@ -34,8 +34,18 @@ mod pool;
 pub mod transaction_pool;
 pub mod types;
 
-pub use crate::pool::Pool;
-pub use crate::transaction_pool::TransactionPool;
-pub use crate::types::{
+pub use self::types::{
 	BlockChain, DandelionConfig, PoolAdapter, PoolConfig, PoolEntry, PoolError, TxSource,
 };
+
+pub use crate::pool::Pool;
+pub use crate::transaction_pool::TransactionPool;
+
+use grin_core::core::{BlockHeader, Transaction};
+use grin_p2p::types::PeerInfo;
+
+/// Trait for sending messages from the pool to the network layer.
+pub trait PoolToNetMessages {
+	/// Called when a transaction is received from the network.
+	fn tx_received(&self, peer: &PeerInfo, tx: Transaction, header: &BlockHeader);
+}
