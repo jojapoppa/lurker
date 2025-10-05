@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chrono::Utc;
 use grin_p2p::types::{PeerInfo, ReasonForBan};
+use grin_p2p::Peers;
 use log::{error, warn};
 use std::sync::{Arc, RwLock, Weak};
 use std::thread;
 
 use crate::chain;
+use crate::chain::SyncState;
+use crate::common::hooks::NetEvents;
+use crate::common::types::ServerConfig;
 use crate::core::core::hash::{Hash, Hashed};
 use crate::core::core::{Block, BlockHeader, BlockSums, Inputs, OutputIdentifier, Transaction};
 use crate::pool::{
@@ -25,6 +30,12 @@ use crate::pool::{
 };
 use crate::util::{OneTime, StopState};
 use crate::ServerTxPool;
+use grin_util::RwLockWriteGuard;
+
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
+use tokio::runtime::Runtime;
+use yggdrasilctl::Endpoint;
 
 /// Implements the view of the chain required by the TransactionPool to
 /// operate. Mostly needed to break any direct lifecycle or implementation
@@ -104,6 +115,7 @@ impl BlockChain for PoolToChainAdapter {
 #[derive(Clone)]
 pub struct PoolToNetAdapter {
 	tx_pool: OneTime<Weak<RwLock<ServerTxPool>>>,
+	peers: Option<Arc<Peers>>,
 }
 
 impl PoolToNetAdapter {
@@ -111,12 +123,26 @@ impl PoolToNetAdapter {
 	pub fn new() -> PoolToNetAdapter {
 		PoolToNetAdapter {
 			tx_pool: OneTime::new(),
+			peers: None,
 		}
 	}
 
 	/// Set the pool adapter's tx_pool. Should only be called once.
 	pub fn set_tx_pool(&self, tx_pool_ref: Arc<RwLock<ServerTxPool>>) {
 		self.tx_pool.init(Arc::downgrade(&tx_pool_ref));
+	}
+
+	/// Initialize with peers
+	pub fn init(&self, peers: Arc<Peers>) {
+		self.peers = Some(peers);
+	}
+
+	/// Placeholder dummy adapter
+	pub fn dummy() -> PoolToNetAdapter {
+		PoolToNetAdapter {
+			tx_pool: OneTime::new(),
+			peers: None,
+		}
 	}
 
 	fn tx_pool(&self) -> Arc<RwLock<ServerTxPool>> {
@@ -132,11 +158,30 @@ impl PoolToNetMessages for PoolToNetAdapter {
 		let tx_pool = self.tx_pool();
 		let peer = peer.clone();
 		let header = header.clone();
-		thread::spawn(move || match tx_pool.write() {
-			Ok(arc_guard) => match arc_guard.write() {
-				Ok(mut tx_pool_lock) => {
-					let res =
-						tx_pool_lock.add_to_pool(TxSource::Peer(peer.addr), tx, true, &header);
+		thread::spawn(move || {
+			// Acquire outer lock
+			let outer_lock: RwLockWriteGuard<Arc<RwLock<ServerTxPool>>> = match tx_pool.write() {
+				Ok(lock) => lock,
+				Err(e) => {
+					warn!("Failed to acquire outer tx_pool lock: {:?}", e);
+					return;
+				}
+			};
+			// Acquire inner lock
+			let inner_result: Result<
+				RwLockWriteGuard<
+					crate::pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>,
+				>,
+				_,
+			> = outer_lock.write();
+			match inner_result {
+				Ok(mut inner_lock) => {
+					let entry = PoolEntry {
+						src: TxSource::Peer(peer.addr.0),
+						tx,
+						tx_at: Utc::now(),
+					};
+					let res = inner_lock.add_to_pool(entry, None, &header);
 					if let Err(e) = res {
 						warn!("Tx rejected from {}: {:?}", peer, e);
 					}
@@ -144,26 +189,89 @@ impl PoolToNetMessages for PoolToNetAdapter {
 				Err(e) => {
 					warn!("Failed to acquire inner tx_pool lock: {:?}", e);
 				}
-			},
-			Err(e) => {
-				warn!("Failed to acquire outer tx_pool lock: {:?}", e);
-			}
-		});
-	}
+			} // Close inner_result match
+		}); // Close thread::spawn
+	} // Close tx_received
 }
 
 impl PoolAdapter for PoolToNetAdapter {
 	fn tx_accepted(&self, entry: &PoolEntry) {
-		// Broadcast the accepted tx to peers (fluff phase).
-		// In full impl, send to connected peers via P2P (e.g., Yggdrasil overlay).
-		warn!("tx_accepted: Broadcasting accepted tx {}", entry.tx.hash());
+		let tx = entry.tx.clone();
+		let peers = self
+			.peers
+			.as_ref()
+			.map(|p| p.iter().connected().collect::<Vec<_>>())
+			.unwrap_or_default();
+		let rt = Runtime::new().expect("Failed to create Tokio runtime");
+		rt.block_on(async {
+			let socket_path = "/run/yggdrasil.sock";
+			match UnixStream::connect(socket_path).await {
+				Ok(socket) => {
+					let mut endpoint = Endpoint::attach(socket).await;
+					for peer in peers {
+						let addr = peer.info.addr.0.to_string();
+						if let Err(e) = endpoint.add_peer(&format!("tcp://{}", addr), None).await {
+							warn!("Failed to add Yggdrasil peer {}: {:?}", addr, e);
+						}
+					}
+					let tx_bytes = bincode::serialize(&tx).expect("Failed to serialize tx");
+					warn!(
+						"Broadcasting tx {} to {} Yggdrasil peers",
+						tx.hash(),
+						peers.len()
+					);
+					// Implement broadcasting to all peers
+				}
+				Err(e) => {
+					warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+				}
+			}
+		});
 	}
 
 	fn stem_tx_accepted(&self, entry: &PoolEntry) -> Result<(), PoolError> {
-		// Relay the stem tx to the selected Dandelion peer.
-		// In full impl, select Dandelion peer and send via P2P (e.g., Yggdrasil).
-		warn!("stem_tx_accepted: Relaying stem tx {}", entry.tx.hash());
-		Ok(())
+		let tx = entry.tx.clone();
+		let peers = self
+			.peers
+			.as_ref()
+			.map(|p| p.iter().connected().collect::<Vec<_>>())
+			.unwrap_or_default();
+		let rt = Runtime::new().map_err(|e| PoolError::Other(e.to_string()))?;
+		rt.block_on(async {
+			let socket_path = "/run/yggdrasil.sock";
+			match UnixStream::connect(socket_path).await {
+				Ok(socket) => {
+					let mut endpoint = Endpoint::attach(socket).await;
+					let dandelion_peer = peers
+						.first()
+						.ok_or_else(|| PoolError::Other("No peers available".to_string()))?;
+					let socket_addr = dandelion_peer.info.addr.0;
+					let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+						.await
+						.map_err(|e| PoolError::Other(e.to_string()))?;
+					socket
+						.connect(socket_addr)
+						.await
+						.map_err(|e| PoolError::Other(e.to_string()))?;
+					let tx_bytes =
+						bincode::serialize(&tx).map_err(|e| PoolError::Other(e.to_string()))?;
+					socket
+						.send(&tx_bytes)
+						.await
+						.map_err(|e| PoolError::Other(e.to_string()))?;
+					warn!(
+						"Relayed stem tx {} to Yggdrasil peer {}",
+						tx.hash(),
+						socket_addr
+					);
+					Ok(())
+				}
+				Err(e) => {
+					warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+					Err(PoolError::Other(e.to_string()))
+				}
+			}
+		})
 	}
 }
 
@@ -171,12 +279,34 @@ impl PoolAdapter for PoolToNetAdapter {
 #[derive(Clone)]
 pub struct NetToChainAdapter {
 	chain: Arc<chain::Chain>,
+	sync_state: Arc<SyncState>,
+	tx_pool: Arc<RwLock<ServerTxPool>>,
+	config: ServerConfig,
+	net_hooks: Vec<Box<dyn NetEvents + Send + Sync>>,
+	peers: Option<Arc<Peers>>,
 }
 
 impl NetToChainAdapter {
 	/// Create a new network adapter
-	pub fn new(chain: Arc<chain::Chain>) -> NetToChainAdapter {
-		NetToChainAdapter { chain }
+	pub fn new(
+		sync_state: Arc<SyncState>,
+		chain: Arc<chain::Chain>,
+		tx_pool: Arc<RwLock<ServerTxPool>>,
+		config: ServerConfig,
+		net_hooks: Vec<Box<dyn NetEvents + Send + Sync>>,
+	) -> NetToChainAdapter {
+		NetToChainAdapter {
+			chain,
+			sync_state,
+			tx_pool,
+			config,
+			net_hooks,
+			peers: None,
+		}
+	}
+
+	pub fn init(&mut self, peers: Arc<Peers>) {
+		self.peers = Some(peers);
 	}
 }
 
@@ -234,6 +364,7 @@ impl grin_p2p::BlockChain for NetToChainAdapter {
 pub struct ChainToPoolAndNetAdapter {
 	chain: Arc<chain::Chain>,
 	tx_pool: Arc<RwLock<ServerTxPool>>,
+	peers: Option<Arc<Peers>>,
 }
 
 impl ChainToPoolAndNetAdapter {
@@ -242,7 +373,15 @@ impl ChainToPoolAndNetAdapter {
 		chain: Arc<chain::Chain>,
 		tx_pool: Arc<RwLock<ServerTxPool>>,
 	) -> ChainToPoolAndNetAdapter {
-		ChainToPoolAndNetAdapter { chain, tx_pool }
+		ChainToPoolAndNetAdapter {
+			chain,
+			tx_pool,
+			peers: None,
+		}
+	}
+
+	pub fn init(&self, peers: Arc<Peers>) {
+		self.peers = Some(peers);
 	}
 }
 
@@ -351,11 +490,30 @@ impl PoolToNetMessages for ChainToPoolAndNetAdapter {
 		let tx_pool = self.tx_pool.clone();
 		let peer = peer.clone();
 		let header = header.clone();
-		thread::spawn(move || match tx_pool.write() {
-			Ok(arc_guard) => match arc_guard.write() {
-				Ok(mut tx_pool_lock) => {
-					let res =
-						tx_pool_lock.add_to_pool(TxSource::Peer(peer.addr), tx, true, &header);
+		thread::spawn(move || {
+			// Acquire outer lock
+			let outer_lock: RwLockWriteGuard<Arc<RwLock<ServerTxPool>>> = match tx_pool.write() {
+				Ok(lock) => lock,
+				Err(e) => {
+					warn!("Failed to acquire outer tx_pool lock: {:?}", e);
+					return;
+				}
+			};
+			// Acquire inner lock
+			let inner_result: Result<
+				RwLockWriteGuard<
+					crate::pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>,
+				>,
+				_,
+			> = outer_lock.write();
+			match inner_result {
+				Ok(mut inner_lock) => {
+					let entry = PoolEntry {
+						src: TxSource::Peer(peer.addr.0),
+						tx,
+						tx_at: Utc::now(),
+					};
+					let res = inner_lock.add_to_pool(entry, None, &header);
 					if let Err(e) = res {
 						warn!("Tx rejected from {}: {:?}", peer, e);
 					}
@@ -363,12 +521,9 @@ impl PoolToNetMessages for ChainToPoolAndNetAdapter {
 				Err(e) => {
 					warn!("Failed to acquire inner tx_pool lock: {:?}", e);
 				}
-			},
-			Err(e) => {
-				warn!("Failed to acquire outer tx_pool lock: {:?}", e);
-			}
-		});
-	}
+			} // Close inner_result match
+		}); // Close thread::spawn
+	} // Close tx_received
 }
 
 /// Dandelion relay adapter trait.

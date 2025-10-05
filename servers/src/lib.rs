@@ -38,9 +38,7 @@ use grin_util as util;
 pub mod common;
 pub mod grin;
 pub use common::adapters::DandelionAdapter;
-mod mining;
-
-pub use grin::seed::{resolve_dns_to_addrs, MAINNET_DNS_SEEDS, TESTNET_DNS_SEEDS};
+pub mod mining;
 
 pub use crate::common::stats::{DiffBlock, PeerStats, ServerStats, StratumStats, WorkerStats};
 pub use crate::common::types::{ServerConfig, StratumServerConfig};

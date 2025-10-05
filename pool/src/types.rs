@@ -25,6 +25,7 @@ use self::core::global::DEFAULT_ACCEPT_FEE_BASE;
 use chrono::prelude::*;
 use grin_core as core;
 use grin_keychain as keychain;
+use std::net::SocketAddr;
 
 /// Dandelion "epoch" length.
 const DANDELION_EPOCH_SECS: u16 = 600;
@@ -181,9 +182,6 @@ impl PoolEntry {
 /// Used to make decisions based on transaction acceptance priority from
 /// various sources. For example, a node may want to bypass pool size
 /// restrictions when accepting a transaction from a local wallet.
-///
-/// Most likely this will evolve to contain some sort of network identifier,
-/// once we get a better sense of what transaction building might look like.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TxSource {
 	PushApi,
@@ -191,6 +189,7 @@ pub enum TxSource {
 	Fluff,
 	EmbargoExpired,
 	Deaggregate,
+	Peer(std::net::SocketAddr), // Added for Yggdrasil
 }
 
 impl TxSource {
@@ -225,9 +224,6 @@ pub enum PoolError {
 	/// Attempt to spend a coinbase output before it has sufficiently matured.
 	#[error("Immature coinbase")]
 	ImmatureCoinbase,
-	/// Problem propagating a stem tx to the next Dandelion relay node.
-	#[error("Dandelion error")]
-	DandelionError,
 	/// Transaction pool is over capacity, can't accept more transactions
 	#[error("Over capacity")]
 	OverCapacity,

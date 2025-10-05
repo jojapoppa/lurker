@@ -39,3 +39,5 @@ grin_p2p = { path = "../p2p", version = "5.4.0-alpha.0" }
 grin_pool = { path = "../pool", version = "5.4.0-alpha.0" }
 grin_store = { path = "../store", version = "5.4.0-alpha.0" }
 grin_wallet_util = { path = "../../lurker-wallet/util", version = "5.4.0-alpha.0" }
+
+yggdrasilctl = { git = "https://github.com/jojapoppa/yggdrasilctl.git", branch = "main", default-features = false, features = ["use_tokio"] } # Added for Yggdrasil
