@@ -1,23 +1,9 @@
-// Copyright 2021 The Grin Developers
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 use crate::api;
 use crate::api::TLSConfig;
 use crate::chain::{SyncState, SyncStatus};
 use crate::common::hooks::init_net_hooks;
 use crate::common::types::Error;
-use crate::common::{adapters, stats, types};
+use crate::common::{adapters, stats};
 use crate::core::core::hash::Hashed;
 use crate::core::core::{Block, Transaction};
 use crate::core::genesis;
@@ -30,9 +16,7 @@ use crate::grin::sync;
 use crate::p2p::Capabilities;
 use crate::util::file::get_first_line;
 use crate::util::StopState;
-use crate::{chain, p2p, pool};
 use grin_util::RwLock;
-use log::{debug, error, info, warn};
 use std::sync::Arc;
 use std::{fs::File, io, thread};
 use tokio::sync::oneshot;
@@ -80,7 +64,7 @@ impl Server {
 			pool_adapter.clone(),
 			pool_net_adapter.clone(),
 		)));
-		pool_net_adapter.set_tx_pool(tx_pool.clone());
+		pool_net_adapter.set_tx_pool(adapters::DandelionTxPool(Arc::new(tx_pool.clone())));
 
 		let sync_state = Arc::new(SyncState::new());
 
@@ -105,7 +89,7 @@ impl Server {
 
 		let chain_adapter = Arc::new(adapters::ChainToPoolAndNetAdapter::new(
 			shared_chain.clone(),
-			tx_pool.clone(),
+			adapters::DandelionTxPool(Arc::new(tx_pool.clone())),
 		));
 
 		let net_adapter = Arc::new(adapters::NetToChainAdapter::new(
@@ -212,7 +196,7 @@ impl Server {
 		info!("Starting dandelion monitor: {}", &config.api_http_addr);
 		let dandelion_thread = dandelion_monitor::monitor_transactions(
 			config.dandelion_config.clone(),
-			tx_pool.clone(),
+			adapters::DandelionTxPool(Arc::new(tx_pool.clone())),
 			pool_net_adapter,
 			stop_state.clone(),
 		)?;

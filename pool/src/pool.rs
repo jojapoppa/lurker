@@ -21,14 +21,16 @@ use self::core::core::transaction;
 use self::core::core::{
 	Block, BlockHeader, BlockSums, Committed, OutputIdentifier, Transaction, TxKernel, Weighting,
 };
-use crate::types::{BlockChain, PoolEntry, PoolError};
+use crate::types::{BlockChain, PoolAdapter, PoolEntry, PoolError, TxSource};
+use chrono::prelude::*;
 use grin_core as core;
 use grin_util as util;
 use grin_util::RwLock;
+use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use util::static_secp_instance; // Added for consistency with lock_api
+use util::static_secp_instance;
 
 /// Configuration for the transaction pool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,18 +88,13 @@ where
 		stem: bool,
 		header: &BlockHeader,
 	) -> Result<(), PoolError> {
-		let pool = if stem {
-			&mut self.stempool
-		} else {
-			&mut self.txpool
-		};
-
 		let entry = PoolEntry {
 			src,
 			tx,
-			tx_at: chrono::Utc::now(),
+			tx_at: Utc::now(),
 		};
 
+		// Compute extra_tx first to avoid borrowing conflicts
 		let extra_tx = if stem {
 			Some(
 				self.txpool
@@ -108,7 +105,13 @@ where
 			None
 		};
 
-		pool.add_to_pool(entry, extra_tx, header)?;
+		let pool = if stem {
+			&mut self.stempool
+		} else {
+			&mut self.txpool
+		};
+
+		pool.add_to_pool(entry.clone(), extra_tx, header)?; // Clone entry to avoid move
 		self.adapter.tx_accepted(&entry);
 		Ok(())
 	}

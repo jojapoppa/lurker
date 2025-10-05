@@ -18,10 +18,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::common::adapters::DandelionTxPool;
 use crate::core::core::hash::Hashed;
 use crate::core::core::transaction;
 use crate::pool::{BlockChain, DandelionConfig, Pool, PoolEntry, PoolError, TxSource};
-use crate::util::{RwLock, StopState}; // Use lock_api via util::RwLock
+use crate::util::{RwLock, StopState};
 use crate::DandelionAdapter;
 use crate::ServerTxPool;
 
@@ -35,7 +36,7 @@ use crate::ServerTxPool;
 /// sending only to the peer relay.
 pub fn monitor_transactions(
 	dandelion_config: DandelionConfig,
-	tx_pool: ServerTxPool,
+	tx_pool: DandelionTxPool,
 	adapter: Arc<dyn DandelionAdapter>,
 	stop_state: Arc<StopState>,
 ) -> std::io::Result<thread::JoinHandle<()>> {
@@ -99,11 +100,11 @@ where
 
 fn process_fluff_phase(
 	dandelion_config: &DandelionConfig,
-	tx_pool: &ServerTxPool,
+	tx_pool: &DandelionTxPool,
 	adapter: &Arc<dyn DandelionAdapter>,
 ) -> Result<(), PoolError> {
 	// Take a write lock on the txpool for the duration of this processing.
-	let mut tx_pool = tx_pool.write();
+	let mut tx_pool = tx_pool.inner().write();
 
 	let all_entries = tx_pool.stempool.entries.clone();
 	if all_entries.is_empty() {
@@ -147,10 +148,10 @@ fn process_fluff_phase(
 
 fn process_expired_entries(
 	dandelion_config: &DandelionConfig,
-	tx_pool: &ServerTxPool,
+	tx_pool: &DandelionTxPool,
 ) -> Result<(), PoolError> {
 	// Take a write lock on the txpool for the duration of this processing.
-	let mut tx_pool = tx_pool.write();
+	let mut tx_pool = tx_pool.inner().write();
 
 	let embargo_secs = dandelion_config.embargo_secs + thread_rng().gen_range(0, 31);
 	let expired_entries = select_txs_cutoff(&tx_pool.stempool, embargo_secs);
