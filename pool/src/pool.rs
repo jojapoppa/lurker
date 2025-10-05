@@ -22,9 +22,9 @@ use self::core::core::{
 	Block, BlockHeader, BlockSums, Committed, OutputIdentifier, Transaction, TxKernel, Weighting,
 };
 use crate::types::{BlockChain, PoolEntry, PoolError};
-use crate::util::RwLock;
 use grin_core as core;
 use grin_util as util;
+use grin_util::RwLock;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

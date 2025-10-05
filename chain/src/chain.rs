@@ -32,13 +32,13 @@ use crate::types::{
 	BlockStatus, ChainAdapter, CommitPos, NoStatus, Options, Tip, TxHashsetWriteStatus,
 };
 use crate::util::secp::pedersen::{Commitment, RangeProof};
-use crate::util::RwLock;
 use crate::{
 	core::core::hash::{Hash, Hashed},
 	store::Batch,
 	txhashset::{ExtensionPair, HeaderExtension},
 };
 use grin_store::Error::NotFoundErr;
+use grin_util::RwLock;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};

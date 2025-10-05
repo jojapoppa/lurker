@@ -23,7 +23,7 @@ use crate::chain::{self, SyncState, SyncStatus, Tip};
 use crate::core::core::hash::{Hash, Hashed};
 use crate::core::core::BlockHeader;
 use crate::p2p;
-use crate::util::RwLock; // Added for consistency with lock_api
+use grin_util::RwLock;
 
 pub struct BodySync {
 	chain: Arc<chain::Chain>,

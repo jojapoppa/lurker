@@ -17,7 +17,8 @@ serde_derive = "1"
 thiserror = "1"
 log = "0.4"
 chrono = "0.4.11"
-grin_util = "5.3.3"
+
+grin_util = { path = "../util" }
 
 grin_core = { path = "../core", version = "5.4.0-alpha.0" }
 grin_p2p = { path = "../p2p", version = "5.4.0-alpha.0" }

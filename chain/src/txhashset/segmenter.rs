@@ -22,7 +22,7 @@ use crate::core::core::{BlockHeader, OutputIdentifier, Segment, SegmentIdentifie
 use crate::error::Error;
 use crate::txhashset::{BitmapAccumulator, BitmapChunk, TxHashSet};
 use crate::util::secp::pedersen::RangeProof;
-use crate::util::RwLock; // Uses lock_api::RwLock via parking_lot
+use grin_util::RwLock;
 
 /// Segmenter for generating PIBD segments.
 #[derive(Clone)]

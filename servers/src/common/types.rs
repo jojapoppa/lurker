@@ -30,7 +30,7 @@ use crate::p2p;
 use crate::pool;
 use crate::pool::types::DandelionConfig;
 use crate::store;
-use crate::util::RwLock; // Added for consistency with lock_api
+use grin_util::RwLock;
 
 /// Error type wrapping underlying module errors.
 #[derive(Debug)]

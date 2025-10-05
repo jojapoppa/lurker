@@ -24,8 +24,8 @@ use crate::core::core::pmmr::segment::{Segment, SegmentIdentifier, SegmentProof}
 use crate::core::core::pmmr::{self, Backend, ReadablePMMR, ReadonlyPMMR, VecBackend, PMMR};
 use crate::core::ser::{self, PMMRable, Readable, Reader, Writeable, Writer};
 use crate::error::Error;
-use crate::util::RwLock; // Added for consistency with lock_api
 use enum_primitive::FromPrimitive;
+use grin_util::RwLock;
 
 /// The "bitmap accumulator" allows us to commit to a specific bitmap by splitting it into
 /// fragments and inserting these fragments into an MMR to produce an overall root hash.

@@ -21,7 +21,7 @@ use crate::common::types::Error;
 use crate::core::consensus::Difficulty;
 use crate::core::core::hash::Hash;
 use crate::p2p::{self, types::ReasonForBan, Capabilities, Peer};
-use crate::util::RwLock; // Added for consistency with lock_api
+use grin_util::RwLock;
 
 pub struct HeaderSync {
 	sync_state: Arc<SyncState>,

@@ -19,7 +19,7 @@ use crate::core::ser::ProtocolVersion;
 use crate::msg::{read_message, write_message, Hand, Msg, Shake, Type, USER_AGENT};
 use crate::peer::Peer;
 use crate::types::{Capabilities, Direction, Error, P2PConfig, PeerAddr, PeerInfo, PeerLiveInfo};
-use crate::util::RwLock;
+use grin_util::RwLock;
 use rand::{thread_rng, Rng};
 use std::collections::VecDeque;
 use std::net::{SocketAddr, TcpStream};

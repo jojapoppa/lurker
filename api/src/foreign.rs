@@ -27,8 +27,8 @@ use crate::types::{
 	BlockHeaderPrintable, BlockPrintable, LocatedTxKernel, OutputListing, OutputPrintable, Tip,
 	Version,
 };
-use crate::util::RwLock;
 use crate::{rest::*, BlockListing};
+use grin_util::RwLock;
 use std::sync::Weak;
 
 /// Main interface into all node API functions.

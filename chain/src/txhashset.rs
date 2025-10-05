@@ -15,8 +15,7 @@
 //! Utility structs to handle the 3 hashtrees (output, range proof,
 //! kernel) more conveniently and transactionally.
 
-use crate::util::RwLock; // Added for consistency with lock_api
-
+use grin_util::RwLock;
 mod bitmap_accumulator;
 mod desegmenter;
 mod rewindable_kernel_view;

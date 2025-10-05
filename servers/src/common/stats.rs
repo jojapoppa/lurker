@@ -15,7 +15,7 @@
 //! Server stat collection types, to be used by tests, logging or GUI/TUI
 //! to collect information about server status
 
-use crate::util::RwLock; // Uses lock_api::RwLock via parking_lot
+use grin_util::RwLock;
 use std::sync::Arc;
 use std::time::SystemTime;
 

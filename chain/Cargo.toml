@@ -22,7 +22,8 @@ thiserror = "1"
 chrono = "0.4.11"
 lru-cache = "0.1"
 lazy_static = "1"
-grin_util = "5.3.3"
+
+grin_util = { path = "../util" }
 
 grin_core = { path = "../core", version = "5.4.0-alpha.0" }
 grin_keychain = { path = "../keychain", version = "5.4.0-alpha.0" }

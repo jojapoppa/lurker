@@ -21,8 +21,8 @@ use crate::rest::*;
 use crate::router::{Handler, ResponseFuture};
 use crate::types::*;
 use crate::util;
-use crate::util::RwLock;
 use crate::web::*;
+use grin_util::RwLock;
 use hyper::{Body, Request, StatusCode};
 use std::sync::Weak;
 

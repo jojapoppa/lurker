@@ -23,8 +23,8 @@ use crate::grin::sync::body_sync::BodySync;
 use crate::grin::sync::header_sync::HeaderSync;
 use crate::grin::sync::state_sync::StateSync;
 use crate::p2p;
-use crate::util::RwLock; // Added for consistency with lock_api
 use crate::util::StopState;
+use grin_util::RwLock;
 
 pub fn run_sync(
 	sync_state: Arc<SyncState>,

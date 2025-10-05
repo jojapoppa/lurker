@@ -17,8 +17,8 @@
 use crate::core::core::pmmr::{ReadablePMMR, ReadonlyPMMR, RewindablePMMR};
 use crate::core::core::{BlockHeader, TxKernel};
 use crate::error::Error;
-use crate::util::RwLock; // Added for consistency with lock_api
 use grin_store::pmmr::PMMRBackend;
+use grin_util::RwLock;
 
 /// Rewindable (but readonly) view of the kernel set (based on kernel MMR).
 pub struct RewindableKernelView<'a> {

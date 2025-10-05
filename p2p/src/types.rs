@@ -35,7 +35,7 @@ use crate::core::global;
 use crate::core::ser::{self, ProtocolVersion, Readable, Reader, Writeable, Writer};
 use crate::msg::PeerAddrs;
 use crate::util::secp::pedersen::RangeProof;
-use crate::util::RwLock;
+use grin_util::RwLock;
 
 /// Maximum number of block headers a peer should ever send
 pub const MAX_BLOCK_HEADERS: u32 = 512;

@@ -23,12 +23,12 @@ use self::core::core::{
 	transaction, Block, BlockHeader, HeaderVersion, OutputIdentifier, Transaction, Weighting,
 };
 use self::core::global;
-use self::util::RwLock; // Uses lock_api::RwLock via parking_lot
 use crate::pool::Pool;
 use crate::types::{BlockChain, PoolAdapter, PoolConfig, PoolEntry, PoolError, TxSource};
 use chrono::prelude::*;
 use grin_core as core;
 use grin_util as util;
+use grin_util::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
 

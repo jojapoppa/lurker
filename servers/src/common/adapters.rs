@@ -129,11 +129,9 @@ impl PoolToNetAdapter {
 	}
 
 	/// Set the pool adapter's tx_pool. Should only be called once.
-	pub fn set_tx_pool(
-		&self,
-		tx_pool_ref: Arc<RwLock<pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>>>,
-	) {
-		self.tx_pool.init(Arc::downgrade(&tx_pool_ref));
+	pub fn set_tx_pool(&self, tx_pool_ref: ServerTxPool) {
+		let weak_ref: Weak<ServerTxPool> = Arc::downgrade(&tx_pool_ref);
+		self.tx_pool.init(weak_ref);
 	}
 
 	/// Initialize with peers
@@ -351,9 +349,8 @@ impl grin_p2p::BlockChain for NetToChainAdapter {
 
 #[derive(Clone)]
 pub struct ChainToPoolAndNetAdapter {
-	chain: Arc<chain::Chain>,
-	tx_pool: Arc<RwLock<ServerTxPool>>,
-	peers: Option<Arc<Peers>>,
+	chain: OneTime<Weak<Arc<chain::Chain>>>,
+	pool: OneTime<Weak<ServerTxPool>>,
 }
 
 impl ChainToPoolAndNetAdapter {

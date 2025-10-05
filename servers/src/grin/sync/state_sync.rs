@@ -21,8 +21,8 @@ use crate::core::consensus::Difficulty;
 use crate::core::core::{hash::Hashed, pmmr::segment::SegmentType};
 use crate::core::global;
 use crate::p2p::{self, Capabilities, Peer};
-use crate::util::RwLock;
-use crate::util::StopState; // Added for consistency with lock_api
+use crate::util::StopState;
+use grin_util::RwLock; // Added for consistency with lock_api
 
 /// Fast sync has 3 "states":
 /// * syncing headers
