@@ -21,6 +21,7 @@ use crate::common::types::Error;
 use crate::core::consensus::Difficulty;
 use crate::core::core::hash::Hash;
 use crate::p2p::{self, types::ReasonForBan, Capabilities, Peer};
+use crate::util::RwLock; // Added for consistency with lock_api
 
 pub struct HeaderSync {
 	sync_state: Arc<SyncState>,
@@ -143,11 +144,11 @@ impl HeaderSync {
 									error!("failed to ban peer {}: {:?}", peer.info.addr, e);
 								}
 								info!(
-									"sync: ban a fraud peer: {}, claimed height: {}, total difficulty: {}",
-									peer.info.addr,
-									peer.info.height(),
-									peer.info.total_difficulty(),
-								);
+                                    "sync: ban a fraud peer: {}, claimed height: {}, total difficulty: {}",
+                                    peer.info.addr,
+                                    peer.info.height(),
+                                    peer.info.total_difficulty(),
+                                );
 							}
 						}
 						_ => (),

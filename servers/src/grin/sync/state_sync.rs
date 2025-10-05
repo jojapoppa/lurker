@@ -21,7 +21,8 @@ use crate::core::consensus::Difficulty;
 use crate::core::core::{hash::Hashed, pmmr::segment::SegmentType};
 use crate::core::global;
 use crate::p2p::{self, Capabilities, Peer};
-use crate::util::StopState;
+use crate::util::RwLock;
+use crate::util::StopState; // Added for consistency with lock_api
 
 /// Fast sync has 3 "states":
 /// * syncing headers
@@ -33,10 +34,8 @@ pub struct StateSync {
 	sync_state: Arc<SyncState>,
 	peers: Arc<p2p::Peers>,
 	chain: Arc<chain::Chain>,
-
 	prev_state_sync: Option<DateTime<Utc>>,
 	state_sync_peer: Option<Arc<Peer>>,
-
 	pibd_aborted: bool,
 	earliest_zero_pibd_peer_time: Option<DateTime<Utc>>,
 }
@@ -82,12 +81,12 @@ impl StateSync {
 		stop_state: Arc<StopState>,
 	) -> bool {
 		trace!(
-			"state_sync: head.height: {}, tail.height: {}. header_head.height: {}, highest_height: {}",
-			head.height,
-			tail.height,
-			header_head.height,
-			highest_height,
-		);
+            "state_sync: head.height: {}, tail.height: {}. header_head.height: {}, highest_height: {}",
+            head.height,
+            tail.height,
+            header_head.height,
+            highest_height,
+        );
 
 		let mut sync_need_restart = false;
 
@@ -409,12 +408,12 @@ impl StateSync {
 			}
 			let bhash = txhashset_head.hash();
 			debug!(
-				"state_sync: before txhashset request, header head: {} / {}, txhashset_head: {} / {}",
-				header_head.height,
-				header_head.last_block_h,
-				txhashset_head.height,
-				bhash
-			);
+                "state_sync: before txhashset request, header head: {} / {}, txhashset_head: {} / {}",
+                header_head.height,
+                header_head.last_block_h,
+                txhashset_head.height,
+                bhash
+            );
 			if let Err(e) = peer.send_txhashset_request(txhashset_head.height, bhash) {
 				error!("state_sync: send_txhashset_request err! {:?}", e);
 				return Err(e);

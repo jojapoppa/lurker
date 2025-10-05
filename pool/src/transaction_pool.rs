@@ -23,7 +23,7 @@ use self::core::core::{
 	transaction, Block, BlockHeader, HeaderVersion, OutputIdentifier, Transaction, Weighting,
 };
 use self::core::global;
-use self::util::RwLock;
+use self::util::RwLock; // Uses lock_api::RwLock via parking_lot
 use crate::pool::Pool;
 use crate::types::{BlockChain, PoolAdapter, PoolConfig, PoolEntry, PoolError, TxSource};
 use chrono::prelude::*;
@@ -267,7 +267,7 @@ where
 
 	// Evict a transaction from the txpool.
 	// Uses bucket logic to identify the "last" transaction.
-	// No other tx depends on it and it has low fee_rate
+	// No configuration other tx depends on it and it has low fee_rate
 	pub fn evict_from_txpool(&mut self) {
 		self.txpool.evict_transaction()
 	}

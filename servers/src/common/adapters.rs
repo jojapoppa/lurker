@@ -6,7 +6,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by law or agreed to in writing, software
+// Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
@@ -15,8 +15,8 @@
 use chrono::Utc;
 use grin_p2p::types::{PeerInfo, ReasonForBan};
 use grin_p2p::Peers;
-use log::{error, warn};
-use std::sync::{Arc, RwLock, Weak};
+use log::{error, trace, warn};
+use std::sync::{Arc, Weak};
 use std::thread;
 
 use crate::chain;
@@ -25,12 +25,12 @@ use crate::common::hooks::NetEvents;
 use crate::common::types::ServerConfig;
 use crate::core::core::hash::{Hash, Hashed};
 use crate::core::core::{Block, BlockHeader, BlockSums, Inputs, OutputIdentifier, Transaction};
+use crate::pool;
 use crate::pool::{
 	BlockChain, Pool, PoolAdapter, PoolEntry, PoolError, PoolToNetMessages, TxSource,
 };
-use crate::util::{OneTime, StopState};
+use crate::util::{OneTime, RwLock, StopState};
 use crate::ServerTxPool;
-use grin_util::RwLockWriteGuard;
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
@@ -114,7 +114,8 @@ impl BlockChain for PoolToChainAdapter {
 /// Adapter between the network and the transaction pool.
 #[derive(Clone)]
 pub struct PoolToNetAdapter {
-	tx_pool: OneTime<Weak<RwLock<ServerTxPool>>>,
+	tx_pool:
+		OneTime<Weak<Arc<RwLock<pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>>>>>,
 	peers: Option<Arc<Peers>>,
 }
 
@@ -128,7 +129,10 @@ impl PoolToNetAdapter {
 	}
 
 	/// Set the pool adapter's tx_pool. Should only be called once.
-	pub fn set_tx_pool(&self, tx_pool_ref: Arc<RwLock<ServerTxPool>>) {
+	pub fn set_tx_pool(
+		&self,
+		tx_pool_ref: Arc<RwLock<pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>>>,
+	) {
 		self.tx_pool.init(Arc::downgrade(&tx_pool_ref));
 	}
 
@@ -145,7 +149,7 @@ impl PoolToNetAdapter {
 		}
 	}
 
-	fn tx_pool(&self) -> Arc<RwLock<ServerTxPool>> {
+	fn tx_pool(&self) -> Arc<RwLock<pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>>> {
 		self.tx_pool
 			.borrow()
 			.upgrade()
@@ -159,39 +163,25 @@ impl PoolToNetMessages for PoolToNetAdapter {
 		let peer = peer.clone();
 		let header = header.clone();
 		thread::spawn(move || {
-			// Acquire outer lock
-			let outer_lock: RwLockWriteGuard<Arc<RwLock<ServerTxPool>>> = match tx_pool.write() {
+			// Acquire the transaction pool lock
+			let mut lock = match tx_pool.write() {
 				Ok(lock) => lock,
 				Err(e) => {
-					warn!("Failed to acquire outer tx_pool lock: {:?}", e);
+					warn!("Failed to acquire tx_pool lock: {:?}", e);
 					return;
 				}
 			};
-			// Acquire inner lock
-			let inner_result: Result<
-				RwLockWriteGuard<
-					crate::pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>,
-				>,
-				_,
-			> = outer_lock.write();
-			match inner_result {
-				Ok(mut inner_lock) => {
-					let entry = PoolEntry {
-						src: TxSource::Peer(peer.addr.0),
-						tx,
-						tx_at: Utc::now(),
-					};
-					let res = inner_lock.add_to_pool(entry, None, &header);
-					if let Err(e) = res {
-						warn!("Tx rejected from {}: {:?}", peer, e);
-					}
-				}
-				Err(e) => {
-					warn!("Failed to acquire inner tx_pool lock: {:?}", e);
-				}
-			} // Close inner_result match
-		}); // Close thread::spawn
-	} // Close tx_received
+			let entry = PoolEntry {
+				src: TxSource::Peer(peer.addr.0),
+				tx,
+				tx_at: Utc::now(),
+			};
+			let res = lock.add_to_pool(entry, None, &header);
+			if let Err(e) = res {
+				warn!("Tx rejected from {}: {:?}", peer, e);
+			}
+		});
+	}
 }
 
 impl PoolAdapter for PoolToNetAdapter {
@@ -359,7 +349,6 @@ impl grin_p2p::BlockChain for NetToChainAdapter {
 	}
 }
 
-/// Combined adapter from the chain to the pool and network.
 #[derive(Clone)]
 pub struct ChainToPoolAndNetAdapter {
 	chain: Arc<chain::Chain>,
@@ -491,39 +480,25 @@ impl PoolToNetMessages for ChainToPoolAndNetAdapter {
 		let peer = peer.clone();
 		let header = header.clone();
 		thread::spawn(move || {
-			// Acquire outer lock
-			let outer_lock: RwLockWriteGuard<Arc<RwLock<ServerTxPool>>> = match tx_pool.write() {
+			// Acquire the transaction pool lock
+			let mut lock = match tx_pool.write() {
 				Ok(lock) => lock,
 				Err(e) => {
-					warn!("Failed to acquire outer tx_pool lock: {:?}", e);
+					warn!("Failed to acquire tx_pool lock: {:?}", e);
 					return;
 				}
 			};
-			// Acquire inner lock
-			let inner_result: Result<
-				RwLockWriteGuard<
-					crate::pool::TransactionPool<PoolToChainAdapter, PoolToNetAdapter>,
-				>,
-				_,
-			> = outer_lock.write();
-			match inner_result {
-				Ok(mut inner_lock) => {
-					let entry = PoolEntry {
-						src: TxSource::Peer(peer.addr.0),
-						tx,
-						tx_at: Utc::now(),
-					};
-					let res = inner_lock.add_to_pool(entry, None, &header);
-					if let Err(e) = res {
-						warn!("Tx rejected from {}: {:?}", peer, e);
-					}
-				}
-				Err(e) => {
-					warn!("Failed to acquire inner tx_pool lock: {:?}", e);
-				}
-			} // Close inner_result match
-		}); // Close thread::spawn
-	} // Close tx_received
+			let entry = PoolEntry {
+				src: TxSource::Peer(peer.addr.0),
+				tx,
+				tx_at: Utc::now(),
+			};
+			let res = lock.add_to_pool(entry, None, &header);
+			if let Err(e) = res {
+				warn!("Tx rejected from {}: {:?}", peer, e);
+			}
+		});
+	}
 }
 
 /// Dandelion relay adapter trait.

@@ -21,16 +21,16 @@ use std::time::{Duration, Instant};
 use crate::core::core::hash::Hashed;
 use crate::core::core::transaction;
 use crate::pool::{BlockChain, DandelionConfig, Pool, PoolEntry, PoolError, TxSource};
-use crate::util::StopState;
+use crate::util::{RwLock, StopState}; // Use lock_api via util::RwLock
 use crate::DandelionAdapter;
 use crate::ServerTxPool;
 
 /// A process to monitor transactions in the stempool.
-/// With Dandelion, transaction can be broadcasted in stem or fluff phase.
-/// When sent in stem phase, the transaction is relayed to only node: the
-/// dandelion relay. In order to maintain reliability a timer is started for
-/// each transaction sent in stem phase. This function will monitor the
-/// stempool and test if the timer is expired for each transaction. In that case
+/// With Dandelion, transactions can be broadcasted in stem or fluff phase.
+/// When sent in stem phase, the transaction is relayed to only one node: the
+/// dandelion relay. To maintain reliability, a timer is started for
+/// each transaction sent in stem phase. This function monitors the
+/// stempool and tests if the timer has expired for each transaction. In that case,
 /// the transaction will be sent in fluff phase (to multiple peers) instead of
 /// sending only to the peer relay.
 pub fn monitor_transactions(
@@ -83,8 +83,8 @@ pub fn monitor_transactions(
 		})
 }
 
-// Query the pool for transactions older than the cutoff.
-// Used for both periodic fluffing and handling expired embargo timer.
+/// Query the pool for transactions older than the cutoff.
+/// Used for both periodic fluffing and handling expired embargo timer.
 fn select_txs_cutoff<B>(pool: &Pool<B>, cutoff_secs: u16) -> Vec<PoolEntry>
 where
 	B: BlockChain,

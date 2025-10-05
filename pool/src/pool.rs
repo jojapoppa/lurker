@@ -22,12 +22,115 @@ use self::core::core::{
 	Block, BlockHeader, BlockSums, Committed, OutputIdentifier, Transaction, TxKernel, Weighting,
 };
 use crate::types::{BlockChain, PoolEntry, PoolError};
+use crate::util::RwLock;
 use grin_core as core;
 use grin_util as util;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use util::static_secp_instance;
+use util::static_secp_instance; // Added for consistency with lock_api
+
+/// Configuration for the transaction pool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolConfig {
+	/// Maximum number of transactions allowed in the pool
+	pub max_pool_size: usize,
+	/// Maximum number of transactions in the stem pool
+	pub max_stempool_size: usize,
+	/// Minimum acceptable transaction fee rate (in nanocoins per weight unit)
+	pub min_fee_rate: u64,
+}
+
+impl Default for PoolConfig {
+	fn default() -> PoolConfig {
+		PoolConfig {
+			max_pool_size: 1000,
+			max_stempool_size: 1000,
+			min_fee_rate: 1000,
+		}
+	}
+}
+
+/// Transaction pool implementation, used for both txpool and stempool.
+pub struct TransactionPool<A: PoolAdapter, B: BlockChain> {
+	pub config: PoolConfig,
+	pub txpool: Pool<B>,
+	pub stempool: Pool<B>,
+	pub adapter: Arc<A>,
+	pub blockchain: Arc<B>,
+}
+
+impl<A, B> TransactionPool<A, B>
+where
+	A: PoolAdapter,
+	B: BlockChain,
+{
+	pub fn new(config: PoolConfig, adapter: Arc<A>, blockchain: Arc<B>) -> Self {
+		TransactionPool {
+			config,
+			txpool: Pool::new(blockchain.clone(), "txpool".to_string()),
+			stempool: Pool::new(blockchain.clone(), "stempool".to_string()),
+			adapter,
+			blockchain,
+		}
+	}
+
+	pub fn chain_head(&self) -> Result<BlockHeader, PoolError> {
+		self.blockchain.chain_head()
+	}
+
+	pub fn add_to_pool(
+		&mut self,
+		src: TxSource,
+		tx: Transaction,
+		stem: bool,
+		header: &BlockHeader,
+	) -> Result<(), PoolError> {
+		let pool = if stem {
+			&mut self.stempool
+		} else {
+			&mut self.txpool
+		};
+
+		let entry = PoolEntry {
+			src,
+			tx,
+			tx_at: chrono::Utc::now(),
+		};
+
+		let extra_tx = if stem {
+			Some(
+				self.txpool
+					.all_transactions_aggregate(None)?
+					.unwrap_or(Transaction::empty()),
+			)
+		} else {
+			None
+		};
+
+		pool.add_to_pool(entry, extra_tx, header)?;
+		self.adapter.tx_accepted(&entry);
+		Ok(())
+	}
+
+	pub fn all_transactions_aggregate(
+		&self,
+		extra_tx: Option<Transaction>,
+	) -> Result<Option<Transaction>, PoolError> {
+		self.txpool.all_transactions_aggregate(extra_tx)
+	}
+
+	pub fn validate_raw_txs(
+		&self,
+		txs: &[Transaction],
+		extra_tx: Option<Transaction>,
+		header: &BlockHeader,
+		weighting: Weighting,
+	) -> Result<Vec<Transaction>, PoolError> {
+		self.txpool
+			.validate_raw_txs(txs, extra_tx, header, weighting)
+	}
+}
 
 pub struct Pool<B>
 where

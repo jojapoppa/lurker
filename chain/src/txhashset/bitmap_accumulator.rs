@@ -24,6 +24,7 @@ use crate::core::core::pmmr::segment::{Segment, SegmentIdentifier, SegmentProof}
 use crate::core::core::pmmr::{self, Backend, ReadablePMMR, ReadonlyPMMR, VecBackend, PMMR};
 use crate::core::ser::{self, PMMRable, Readable, Reader, Writeable, Writer};
 use crate::error::Error;
+use crate::util::RwLock; // Added for consistency with lock_api
 use enum_primitive::FromPrimitive;
 
 /// The "bitmap accumulator" allows us to commit to a specific bitmap by splitting it into
@@ -52,7 +53,7 @@ pub struct BitmapAccumulator {
 impl BitmapAccumulator {
 	const NBITS: u64 = BitmapChunk::LEN_BITS as u64;
 
-	/// Crate a new empty bitmap accumulator.
+	/// Create a new empty bitmap accumulator.
 	pub fn new() -> BitmapAccumulator {
 		BitmapAccumulator {
 			backend: VecBackend::new(),
@@ -490,13 +491,13 @@ impl Readable for BitmapBlock {
 }
 
 enum_from_primitive! {
-	#[derive(Debug, Clone, Copy, PartialEq)]
-	#[repr(u8)]
-	enum BitmapBlockSerialization {
-		Raw = 0,
-		Positive = 1,
-		Negative = 2,
-	}
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
+enum BitmapBlockSerialization {
+	Raw = 0,
+	Positive = 1,
+	Negative = 2,
+}
 }
 
 impl Writeable for BitmapBlockSerialization {

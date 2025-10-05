@@ -12,44 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//! Seeds a server with initial peers on first start and keep monitoring
+//! Seeds a server with initial peers on first start and keeps monitoring
 //! peer counts to connect to more if needed. Seeding strategy is
-//! configurable with either no peers, a user-defined list or a preset
-//! list of DNS records (the default).
+//! configurable with either no peers, a user-defined list, or a preset
+//! list of Yggdrasil peers.
 
 use chrono::prelude::{DateTime, Utc};
 use chrono::Duration;
 use p2p::{msg::PeerAddrs, P2PConfig};
 use rand::prelude::*;
 use std::collections::HashMap;
-use std::net::ToSocketAddrs;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::{mpsc, Arc};
-use std::{cmp, str, thread, time};
+use std::{cmp, thread, time};
+use tokio::net::UnixStream;
+use tokio::runtime::Runtime;
+use yggdrasilctl::Endpoint;
 
 use crate::core::consensus::Difficulty;
 use crate::core::global;
 use crate::p2p;
 use crate::p2p::types::PeerAddr;
-use crate::p2p::ChainAdapter;
 use crate::util::StopState;
+use log::{debug, error, trace, warn};
 
-/// DNS Seeds with contact email associated - Mainnet
-pub const MAINNET_DNS_SEEDS: &[&str] = &[
-	"mainnet.seed.grin.lesceller.com", // q.lesceller@gmail.com
-	"mainnet.seed.grin.prokapi.com",   // hendi@prokapi.com
-	"grinseed.revcore.net",            // yeastplume@gmail.com
-	"mainnet-seed.grinnode.live",      // info@grinnode.live
-	"mainnet.grin.punksec.de",         // grin@punksec.de
-	"grinnode.30-r.com",               // trinitron@30-r.com
-];
-
-/// DNS Seeds with contact email associated - Testnet
-pub const TESTNET_DNS_SEEDS: &[&str] = &[
-	"floonet.seed.grin.lesceller.com", // q.lesceller@gmail.com
-	"floonet.seed.grin.prokapi.com",   // hendi@prokapi.com
-	"grintestseed.revcore.net",        // yeastplume@gmail.com
-	"testnet.grin.punksec.de",         // grin@punksec.de
-	"testnet.grinnode.30-r.com",       // trinitron@30-r.com
+// Hardcoded Yggdrasil peers (example; replace with actual known peers)
+pub const YGGDRASIL_SEEDS: &[&str] = &[
+	"tcp://[200::1]:3414", // Example Yggdrasil IPv6 address
+	"tcp://[200::2]:3414", // Replace with real Yggdrasil peers
 ];
 
 pub fn connect_and_monitor(
@@ -63,16 +53,14 @@ pub fn connect_and_monitor(
 		.spawn(move || {
 			let peers = p2p_server.peers.clone();
 
-			// open a channel with a listener that connects every peer address sent below
-			// max peer count
+			// Open a channel for sending peer addresses
 			let (tx, rx) = mpsc::channel();
 
-			// check seeds first
+			// Connect to initial Yggdrasil seeds or peers
 			connect_to_seeds_and_peers(peers.clone(), tx.clone(), seed_list, config);
 
 			let mut prev = DateTime::<Utc>::MIN_UTC;
 			let mut prev_expire_check = DateTime::<Utc>::MIN_UTC;
-
 			let mut prev_ping = Utc::now();
 			let mut start_attempt = 0;
 			let mut connecting_history: HashMap<PeerAddr, DateTime<Utc>> = HashMap::new();
@@ -82,23 +70,19 @@ pub fn connect_and_monitor(
 					break;
 				}
 
-				// Pause egress peer connection request. Only for tests.
 				if stop_state.is_paused() {
 					thread::sleep(time::Duration::from_secs(1));
 					continue;
 				}
 
-				// Check for and remove expired peers from the storage
+				// Check for expired peers
 				if Utc::now() - prev_expire_check > Duration::hours(1) {
 					peers.remove_expired();
-
 					prev_expire_check = Utc::now();
 				}
 
-				// make several attempts to get peers as quick as possible
-				// with exponential backoff
+				// Attempt to connect to peers with exponential backoff
 				if Utc::now() - prev > Duration::seconds(cmp::min(20, 1 << start_attempt)) {
-					// try to connect to any address sent to the channel
 					listen_for_addrs(
 						peers.clone(),
 						p2p_server.clone(),
@@ -106,14 +90,13 @@ pub fn connect_and_monitor(
 						&mut connecting_history,
 					);
 
-					// monitor additional peers if we need to add more
 					monitor_peers(peers.clone(), p2p_server.config.clone(), tx.clone());
 
 					prev = Utc::now();
 					start_attempt = cmp::min(6, start_attempt + 1);
 				}
 
-				// Ping connected peers on every 10s to monitor peers.
+				// Ping connected peers every 10s
 				if Utc::now() - prev_ping > Duration::seconds(10) {
 					let total_diff = peers.total_difficulty();
 					let total_height = peers.total_height();
@@ -130,9 +113,7 @@ pub fn connect_and_monitor(
 		})
 }
 
-fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sender<PeerAddr>) {
-	// regularly check if we need to acquire more peers and if so, gets
-	// them from db
+fn monitor_peers(peers: Arc<p2p::Peers>, config: P2PConfig, tx: mpsc::Sender<PeerAddr>) {
 	let mut total_count = 0;
 	let mut healthy_count = 0;
 	let mut banned_count = 0;
@@ -142,7 +123,6 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 		match x.flags {
 			p2p::State::Banned => {
 				let interval = Utc::now().timestamp() - x.last_banned;
-				// Unban peer
 				if interval >= config.ban_window() {
 					if let Err(e) = peers.unban_peer(x.addr) {
 						error!("failed to unban peer {}: {:?}", x.addr, e);
@@ -168,7 +148,7 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 
 	debug!(
 		"monitor_peers: on {}:{}, {} connected ({} most_work). \
-		all {} = {} healthy + {} banned + {} defunct",
+         all {} = {} healthy + {} banned + {} defunct",
 		config.host,
 		config.port,
 		peers_count,
@@ -179,7 +159,6 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 		defuncts.len(),
 	);
 
-	// maintenance step first, clean up p2p server peers
 	peers.clean_peers(
 		config.peer_max_inbound_count() as usize,
 		config.peer_max_outbound_count() as usize,
@@ -190,25 +169,55 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 		return;
 	}
 
-	// loop over connected peers that can provide peer lists
-	// ask them for their list of peers
+	// Declare connected_peers outside the async block
 	let mut connected_peers: Vec<PeerAddr> = vec![];
-	for p in peers
-		.iter()
-		.with_capabilities(p2p::Capabilities::PEER_LIST)
-		.connected()
-	{
-		trace!(
-			"monitor_peers: {}:{} ask {} for more peers",
-			config.host,
-			config.port,
-			p.info.addr,
-		);
-		let _ = p.send_peer_request(p2p::Capabilities::PEER_LIST);
-		connected_peers.push(p.info.addr)
-	}
 
-	// Attempt to connect to any preferred peers.
+	// Query peers for their peer lists via Yggdrasil
+	let rt = Runtime::new().expect("Failed to create Tokio runtime");
+	rt.block_on(async {
+		let socket_path = "/run/yggdrasil.sock";
+		match UnixStream::connect(socket_path).await {
+			Ok(socket) => {
+				let mut endpoint = Endpoint::attach(socket).await;
+				for p in peers
+					.iter()
+					.with_capabilities(p2p::Capabilities::PEER_LIST)
+					.connected()
+				{
+					trace!(
+						"monitor_peers: {}:{} ask {} for more peers",
+						config.host,
+						config.port,
+						p.info.addr,
+					);
+					let addr = p.info.addr.0.to_string();
+					if let Err(e) = endpoint.add_peer(&format!("tcp://{}", addr), None).await {
+						warn!("Failed to add Yggdrasil peer {}: {:?}", addr, e);
+					} else {
+						let _ = p.send_peer_request(p2p::Capabilities::PEER_LIST);
+						connected_peers.push(p.info.addr);
+					}
+				}
+				// Fetch additional peers from Yggdrasil
+				if let Ok(peer_list) = endpoint.get_peers().await {
+					for peer in peer_list {
+						let addr = PeerAddr(SocketAddr::new(
+							IpAddr::V6(Ipv6Addr::from_str(&peer).unwrap_or(Ipv6Addr::UNSPECIFIED)),
+							config.port,
+						));
+						if !connected_peers.contains(&addr) {
+							let _ = tx.send(addr);
+						}
+					}
+				}
+			}
+			Err(e) => {
+				warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+			}
+		}
+	});
+
+	// Attempt preferred peers
 	let peers_preferred = config.peers_preferred.unwrap_or(PeerAddrs::default());
 	for p in peers_preferred {
 		if !connected_peers.is_empty() {
@@ -220,16 +229,12 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 		}
 	}
 
-	// take a random defunct peer and mark it healthy: over a long enough period any
-	// peer will see another as defunct eventually, gives us a chance to retry
+	// Revive a random defunct peer
 	if let Some(peer) = defuncts.into_iter().choose(&mut thread_rng()) {
 		let _ = peers.update_state(peer.addr, p2p::State::Healthy);
 	}
 
-	// find some peers from our db
-	// and queue them up for a connection attempt
-	// intentionally make too many attempts (2x) as some (most?) will fail
-	// as many nodes in our db are not publicly accessible
+	// Find new peers from DB
 	let max_peer_attempts = 128;
 	let new_peers = peers.find_peers(
 		p2p::State::Healthy,
@@ -237,10 +242,6 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 		max_peer_attempts as usize,
 	);
 
-	// Only queue up connection attempts for candidate peers where we
-	// are confident we do not yet know about this peer.
-	// The call to is_known() may fail due to contention on the peers map.
-	// Do not attempt any connection where is_known() fails for any reason.
 	for p in new_peers {
 		if let Ok(false) = peers.is_known(p.addr) {
 			tx.send(p.addr).unwrap();
@@ -248,18 +249,14 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: p2p::P2PConfig, tx: mpsc::Sende
 	}
 }
 
-// Check if we have any pre-existing peer in db. If so, start with those,
-// otherwise use the seeds provided.
 fn connect_to_seeds_and_peers(
 	peers: Arc<p2p::Peers>,
 	tx: mpsc::Sender<PeerAddr>,
-	seed_list: Box<dyn Fn() -> Vec<PeerAddr>>,
+	seed_list: Box<dyn Fn() -> Vec<PeerAddr> + Send>,
 	config: P2PConfig,
 ) {
 	let peers_deny = config.peers_deny.unwrap_or(PeerAddrs::default());
 
-	// If "peers_allow" is explicitly configured then just use this list
-	// remembering to filter out "peers_deny".
 	if let Some(peers) = config.peers_allow {
 		for addr in peers.difference(peers_deny.as_slice()) {
 			let _ = tx.send(addr);
@@ -267,18 +264,13 @@ fn connect_to_seeds_and_peers(
 		return;
 	}
 
-	// Always try our "peers_preferred" remembering to filter out "peers_deny".
 	if let Some(peers) = config.peers_preferred {
 		for addr in peers.difference(peers_deny.as_slice()) {
 			let _ = tx.send(addr);
 		}
 	}
 
-	// check if we have some peers in db
-	// look for peers that are able to give us other peers (via PEER_LIST capability)
 	let peers = peers.find_peers(p2p::State::Healthy, p2p::Capabilities::PEER_LIST, 100);
-
-	// if so, get their addresses, otherwise use our seeds
 	let peer_addrs = if peers.len() > 3 {
 		peers.iter().map(|p| p.addr).collect::<Vec<_>>()
 	} else {
@@ -289,7 +281,6 @@ fn connect_to_seeds_and_peers(
 		warn!("No seeds were retrieved.");
 	}
 
-	// connect to this initial set of peer addresses (either seeds or from our local db).
 	for addr in peer_addrs {
 		if !peers_deny.as_slice().contains(&addr) {
 			let _ = tx.send(addr);
@@ -297,70 +288,72 @@ fn connect_to_seeds_and_peers(
 	}
 }
 
-/// Regularly poll a channel receiver for new addresses and initiate a
-/// connection if the max peer count isn't exceeded. A request for more
-/// peers is also automatically sent after connection.
 fn listen_for_addrs(
 	peers: Arc<p2p::Peers>,
 	p2p: Arc<p2p::Server>,
 	rx: &mpsc::Receiver<PeerAddr>,
 	connecting_history: &mut HashMap<PeerAddr, DateTime<Utc>>,
 ) {
-	// Pull everything currently on the queue off the queue.
-	// Does not block so addrs may be empty.
-	// We will take(max_peers) from this later but we want to drain the rx queue
-	// here to prevent it backing up.
 	let addrs: Vec<PeerAddr> = rx.try_iter().collect();
-
-	// If we have a healthy number of outbound peers then we are done here.
-	if peers.enough_outbound_peers() {
-		return;
-	}
-
-	// Note: We drained the rx queue earlier to keep it under control.
-	// Even if there are many addresses to try we will only try a bounded number of them for safety.
 	let connect_min_interval = 30;
 	let max_outbound_attempts = 128;
-	for addr in addrs.into_iter().take(max_outbound_attempts) {
-		// ignore the duplicate connecting to same peer within 30 seconds
-		let now = Utc::now();
-		if let Some(last_connect_time) = connecting_history.get(&addr) {
-			if *last_connect_time + Duration::seconds(connect_min_interval) > now {
-				debug!(
-					"peer_connect: ignore a duplicate request to {}. previous connecting time: {}",
-					addr,
-					last_connect_time.format("%H:%M:%S%.3f").to_string(),
-				);
-				continue;
-			} else if let Some(history) = connecting_history.get_mut(&addr) {
-				*history = now;
-			}
-		}
-		connecting_history.insert(addr, now);
 
-		let peers_c = peers.clone();
-		let p2p_c = p2p.clone();
-		thread::Builder::new()
-			.name("peer_connect".to_string())
-			.spawn(move || match p2p_c.connect(addr) {
-				Ok(p) => {
-					// If peer advertises PEER_LIST then ask it for more peers that support PEER_LIST.
-					// We want to build a local db of possible peers to connect to.
-					// We do not necessarily care (at this point in time) what other capabilities these peers support.
-					if p.info.capabilities.contains(p2p::Capabilities::PEER_LIST) {
-						let _ = p.send_peer_request(p2p::Capabilities::PEER_LIST);
-					}
-					let _ = peers_c.update_state(addr, p2p::State::Healthy);
-				}
-				Err(_) => {
-					let _ = peers_c.update_state(addr, p2p::State::Defunct);
-				}
-			})
-			.expect("failed to launch peer_connect thread");
-	}
+	let rt = Runtime::new().expect("Failed to create Tokio runtime");
+	rt.block_on(async {
+        let socket_path = "/run/yggdrasil.sock";
+        match UnixStream::connect(socket_path).await {
+            Ok(socket) => {
+                let mut endpoint = Endpoint::attach(socket).await;
+                for addr in addrs.into_iter().take(max_outbound_attempts) {
+                    // Avoid duplicate connections within 30 seconds
+                    let now = Utc::now();
+                    if let Some(last_connect_time) = connecting_history.get(&addr) {
+                        if *last_connect_time + Duration::seconds(connect_min_interval) > now {
+                            debug!(
+                                "peer_connect: ignore a duplicate request to {}. previous connecting time: {}",
+                                addr,
+                                last_connect_time.format("%H:%M:%S%.3f").to_string(),
+                            );
+                            continue;
+                        } else if let Some(history) = connecting_history.get_mut(&addr) {
+                            *history = now;
+                        }
+                    }
+                    connecting_history.insert(addr, now);
 
-	// shrink the connecting history.
-	// put a threshold here to avoid frequent shrinking in every call
+                    let peers_c = peers.clone();
+                    let p2p_c = p2p.clone();
+                    let addr_str = addr.0.to_string();
+                    thread::Builder::new()
+                        .name("peer_connect".to_string())
+                        .spawn(move || {
+                            if let Err(e) = endpoint.add_peer(&format!("tcp://{}", addr_str), None).block_on() {
+                                warn!("Failed to add Yggdrasil peer {}: {:?}", addr_str, e);
+                                let _ = peers_c.update_state(addr, p2p::State::Defunct);
+                            } else {
+                                match p2p_c.connect(addr) {
+                                    Ok(p) => {
+                                        if p.info.capabilities.contains(p2p::Capabilities::PEER_LIST) {
+                                            let _ = p.send_peer_request(p2p::Capabilities::PEER_LIST);
+                                        }
+                                        let _ = peers_c.update_state(addr, p2p::State::Healthy);
+                                    }
+                                    Err(_) => {
+                                        let _ = peers_c.update_state(addr, p2p::State::Defunct);
+                                    }
+                                }
+                            }
+                        })
+                        .expect("failed to launch peer_connect thread");
+                }
+            }
+            Err(e) => {
+                warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+            }
+        }
+    });
+
+	// Shrink connecting history
 	if connecting_history.len() > 100 {
 		let now = Utc::now();
 		let old: Vec<_> = connecting_history
@@ -376,48 +369,62 @@ fn listen_for_addrs(
 
 pub fn default_dns_seeds() -> Box<dyn Fn() -> Vec<PeerAddr> + Send> {
 	Box::new(|| {
-		let net_seeds = if global::is_testnet() {
-			TESTNET_DNS_SEEDS
-		} else {
-			MAINNET_DNS_SEEDS
-		};
-		resolve_dns_to_addrs(
-			&net_seeds
-				.iter()
-				.map(|s| {
-					s.to_string()
-						+ if global::is_testnet() {
-							":13414"
-						} else {
-							":3414"
+		let rt = Runtime::new().expect("Failed to create Tokio runtime");
+		rt.block_on(async {
+			let socket_path = "/run/yggdrasil.sock";
+			match UnixStream::connect(socket_path).await {
+				Ok(socket) => {
+					let mut endpoint = Endpoint::attach(socket).await;
+					match endpoint.get_peers().await {
+						Ok(peers) => peers
+							.into_iter()
+							.map(|peer| {
+								PeerAddr(SocketAddr::new(
+									IpAddr::V6(
+										Ipv6Addr::from_str(&peer).unwrap_or(Ipv6Addr::UNSPECIFIED),
+									),
+									3414, // Default port; adjust as needed
+								))
+							})
+							.collect(),
+						Err(e) => {
+							warn!("Failed to fetch Yggdrasil peers: {:?}", e);
+							YGGDRASIL_SEEDS
+								.iter()
+								.map(|s| {
+									let addr = s.strip_prefix("tcp://").unwrap_or(s);
+									PeerAddr(SocketAddr::new(
+										IpAddr::V6(
+											Ipv6Addr::from_str(addr)
+												.unwrap_or(Ipv6Addr::UNSPECIFIED),
+										),
+										3414,
+									))
+								})
+								.collect()
 						}
-				})
-				.collect(),
-		)
+					}
+				}
+				Err(e) => {
+					warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+					YGGDRASIL_SEEDS
+						.iter()
+						.map(|s| {
+							let addr = s.strip_prefix("tcp://").unwrap_or(s);
+							PeerAddr(SocketAddr::new(
+								IpAddr::V6(
+									Ipv6Addr::from_str(addr).unwrap_or(Ipv6Addr::UNSPECIFIED),
+								),
+								3414,
+							))
+						})
+						.collect()
+				}
+			}
+		})
 	})
 }
 
-/// Convenience function to resolve dns addresses from DNS records
-pub fn resolve_dns_to_addrs(dns_records: &Vec<String>) -> Vec<PeerAddr> {
-	let mut addresses: Vec<PeerAddr> = vec![];
-	for dns in dns_records {
-		debug!("Retrieving addresses from dns {}", dns);
-		match dns.to_socket_addrs() {
-			Ok(addrs) => addresses.append(
-				&mut addrs
-					.map(PeerAddr)
-					.filter(|addr| !addresses.contains(addr))
-					.collect(),
-			),
-			Err(e) => debug!("Failed to resolve dns {:?} got error {:?}", dns, e),
-		};
-	}
-	debug!("Resolved addresses: {:?}", addresses);
-	addresses
-}
-
-/// Convenience function when the seed list is immediately known. Mostly used
-/// for tests.
 pub fn predefined_seeds(addrs: Vec<PeerAddr>) -> Box<dyn Fn() -> Vec<PeerAddr> + Send> {
 	Box::new(move || addrs.clone())
 }

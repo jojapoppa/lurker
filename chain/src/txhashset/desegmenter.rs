@@ -43,32 +43,21 @@ pub struct Desegmenter {
 	header_pmmr: Arc<RwLock<txhashset::PMMRHandle<BlockHeader>>>,
 	archive_header: BlockHeader,
 	store: Arc<store::ChainStore>,
-
 	genesis: BlockHeader,
-
 	default_bitmap_segment_height: u8,
 	default_output_segment_height: u8,
 	default_rangeproof_segment_height: u8,
 	default_kernel_segment_height: u8,
-
 	bitmap_accumulator: BitmapAccumulator,
 	bitmap_segment_cache: Vec<Segment<BitmapChunk>>,
 	output_segment_cache: Vec<Segment<OutputIdentifier>>,
 	rangeproof_segment_cache: Vec<Segment<RangeProof>>,
 	kernel_segment_cache: Vec<Segment<TxKernel>>,
-
 	bitmap_mmr_leaf_count: u64,
 	bitmap_mmr_size: u64,
-
-	/// Maximum number of segments to cache before we stop requesting others
 	max_cached_segments: usize,
-
-	/// In-memory 'raw' bitmap corresponding to contents of bitmap accumulator
 	bitmap_cache: Option<Bitmap>,
-
-	/// Flag indicating there are no more segments to request
 	all_segments_complete: bool,
-
 	latest_block_height: u64,
 }
 
@@ -97,16 +86,11 @@ impl Desegmenter {
 			output_segment_cache: vec![],
 			rangeproof_segment_cache: vec![],
 			kernel_segment_cache: vec![],
-
 			bitmap_mmr_leaf_count: 0,
 			bitmap_mmr_size: 0,
-
 			max_cached_segments: pibd_params::MAX_CACHED_SEGMENTS,
-
 			bitmap_cache: None,
-
 			all_segments_complete: false,
-
 			latest_block_height: 0,
 		};
 		retval.calc_bitmap_mmr_sizes();
@@ -171,7 +155,6 @@ impl Desegmenter {
 
 		// Find first header in which 'output_mmr_size' and 'kernel_mmr_size' are greater than
 		// given sizes
-
 		let res = {
 			let header_pmmr = self.header_pmmr.read();
 			header_pmmr.get_first_header_with(
@@ -277,7 +260,6 @@ impl Desegmenter {
 
 		// Check kernel MMR root for every block header.
 		// Check NRD relative height rules for full kernel history.
-
 		{
 			let header_pmmr = self.header_pmmr.read();
 			let txhashset = self.txhashset.read();
@@ -349,7 +331,6 @@ impl Desegmenter {
 			{
 				// Save the new head to the db and rebuild the header by height index.
 				let tip = Tip::from_header(&self.archive_header);
-
 				batch.save_body_head(&tip)?;
 
 				// Reset the body tail to the body head after a txhashset write
@@ -744,7 +725,6 @@ impl Desegmenter {
 		// also need to skip the genesis block when applying the segment)
 		// note this is implementation-specific, the code for creating
 		// a new chain creates the genesis block pmmr entries by default
-
 		let mut cur_segment_count = if local_output_mmr_size == 1 {
 			0
 		} else {
@@ -787,7 +767,6 @@ impl Desegmenter {
 		// TODO: This, something very wrong, probably need to reset entire body sync
 		// check bitmap root matches what we already have
 		/*if bitmap_root != Some(self.bitmap_accumulator.root()) {
-
 		}*/
 		segment.validate_with(
 			self.archive_header.output_mmr_size, // Last MMR pos at the height being validated
@@ -855,7 +834,6 @@ impl Desegmenter {
 		// Special case here. If the mmr size is 1, this is a fresh chain
 		// with naught but a humble genesis block. We need segment 0, (and
 		// also need to skip the genesis block when applying the segment)
-
 		let mut cur_segment_count = if local_rangeproof_mmr_size == 1 {
 			0
 		} else {

@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Server stat collection types, to be used by tests, logging or GUI/TUI
 //! to collect information about server status
 
-use crate::util::RwLock;
+use crate::util::RwLock; // Uses lock_api::RwLock via parking_lot
 use std::sync::Arc;
 use std::time::SystemTime;
 

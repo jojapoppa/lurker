@@ -1,3 +1,18 @@
+// Copyright 2021 The Grin Developers
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use crate::api;
 use crate::api::TLSConfig;
 use crate::chain::{SyncState, SyncStatus};
 use crate::common::hooks::init_net_hooks;
@@ -5,16 +20,21 @@ use crate::common::types::Error;
 use crate::common::{adapters, stats, types};
 use crate::core::core::hash::Hashed;
 use crate::core::core::{Block, Transaction};
+use crate::core::genesis;
 use crate::core::global;
 use crate::core::pow;
 use crate::core::ser::ProtocolVersion;
+use crate::grin::dandelion_monitor;
+use crate::grin::seed;
+use crate::grin::sync;
 use crate::p2p::Capabilities;
 use crate::util::file::get_first_line;
-use crate::util::RwLock; // Use grin_util::RwLock
+use crate::util::RwLock;
 use crate::util::StopState;
-use crate::{chain, p2p};
+use crate::{chain, p2p, pool};
+use log::{debug, error, info, warn};
 use std::sync::Arc;
-use std::{io, thread};
+use std::{fs::File, io, thread};
 use tokio::sync::oneshot;
 
 pub type ServerTxPool =
@@ -24,22 +44,19 @@ pub struct Server {
 	pub config: types::ServerConfig,
 	pub p2p: Arc<p2p::Server>,
 	pub chain: Arc<chain::Chain>,
-	pub tx_pool: Arc<
-		RwLock<pool::TransactionPool<adapters::PoolToChainAdapter, adapters::PoolToNetAdapter>>,
-	>,
+	pub tx_pool: ServerTxPool,
 	pub sync_state: Arc<SyncState>,
 	pub state_info: stats::ServerStateInfo,
 	pub stop_state: Arc<StopState>,
-	pub lock_file: io::File,
+	pub lock_file: File,
 	pub connect_thread: Option<thread::JoinHandle<()>>,
 	pub sync_thread: thread::JoinHandle<()>,
 	pub dandelion_thread: thread::JoinHandle<()>,
 }
 
 impl Server {
-	fn one_grin_at_a_time(config: &types::ServerConfig) -> Result<io::File, Error> {
-		// Placeholder for lock file logic
-		Ok(io::File::create(&config.db_root.join("grin.lock"))?)
+	fn one_grin_at_a_time(config: &types::ServerConfig) -> Result<File, Error> {
+		Ok(File::create(&config.db_root.join("grin.lock"))?)
 	}
 
 	pub fn new(

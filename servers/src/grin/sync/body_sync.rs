@@ -23,14 +23,13 @@ use crate::chain::{self, SyncState, SyncStatus, Tip};
 use crate::core::core::hash::{Hash, Hashed};
 use crate::core::core::BlockHeader;
 use crate::p2p;
+use crate::util::RwLock; // Added for consistency with lock_api
 
 pub struct BodySync {
 	chain: Arc<chain::Chain>,
 	peers: Arc<p2p::Peers>,
 	sync_state: Arc<SyncState>,
-
 	blocks_requested: u64,
-
 	receive_timeout: DateTime<Utc>,
 	prev_blocks_received: u64,
 }

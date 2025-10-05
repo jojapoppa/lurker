@@ -30,6 +30,7 @@ use crate::p2p;
 use crate::pool;
 use crate::pool::types::DandelionConfig;
 use crate::store;
+use crate::util::RwLock; // Added for consistency with lock_api
 
 /// Error type wrapping underlying module errors.
 #[derive(Debug)]
@@ -312,7 +313,7 @@ impl Default for WebHooksConfig {
 	}
 }
 
-/// A node is either "stem" of "fluff" for the duration of a single epoch.
+/// A node is either "stem" or "fluff" for the duration of a single epoch.
 /// A node also maintains an outbound relay peer for the epoch.
 #[derive(Debug)]
 pub struct DandelionEpoch {

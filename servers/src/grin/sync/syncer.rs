@@ -23,6 +23,7 @@ use crate::grin::sync::body_sync::BodySync;
 use crate::grin::sync::header_sync::HeaderSync;
 use crate::grin::sync::state_sync::StateSync;
 use crate::p2p;
+use crate::util::RwLock; // Added for consistency with lock_api
 use crate::util::StopState;
 
 pub fn run_sync(
@@ -111,17 +112,17 @@ impl SyncRunner {
 	/// Starts the syncing loop, just spawns two threads that loop forever
 	fn sync_loop(&self) {
 		macro_rules! unwrap_or_restart_loop(
-			($obj: expr) => (
-				match $obj {
-					Ok(v) => v,
-					Err(e) => {
-						error!("unexpected error: {:?}", e);
-						thread::sleep(time::Duration::from_secs(1));
-						continue;
-					},
-				}
-			)
-		);
+            ($obj: expr) => (
+                match $obj {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("unexpected error: {:?}", e);
+                        thread::sleep(time::Duration::from_secs(1));
+                        continue;
+                    },
+                }
+            )
+        );
 
 		// Wait for connections reach at least MIN_PEERS
 		if let Err(e) = self.wait_for_min_peers() {
@@ -304,11 +305,11 @@ impl SyncRunner {
 			let peer_diff = peer_info.total_difficulty();
 			if peer_diff > local_diff + threshold {
 				info!(
-					"sync: total_difficulty {}, peer_difficulty {}, threshold {} (last 5 blocks), enabling sync",
-					local_diff,
-					peer_diff,
-					threshold,
-				);
+                    "sync: total_difficulty {}, peer_difficulty {}, threshold {} (last 5 blocks), enabling sync",
+                    local_diff,
+                    peer_diff,
+                    threshold,
+                );
 				is_syncing = true;
 			}
 		}
