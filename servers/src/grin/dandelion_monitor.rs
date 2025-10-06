@@ -18,13 +18,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::common::adapters::DandelionTxPool;
 use crate::core::core::hash::Hashed;
 use crate::core::core::transaction;
-use crate::pool::{BlockChain, DandelionConfig, Pool, PoolEntry, PoolError, TxSource};
 use crate::util::{RwLock, StopState};
-use crate::DandelionAdapter;
-use crate::ServerTxPool;
+use grin_pool::{DandelionAdapter, DandelionTxPool, Pool, PoolEntry, PoolError, TxSource};
 
 /// A process to monitor transactions in the stempool.
 /// With Dandelion, transactions can be broadcasted in stem or fluff phase.
@@ -36,7 +33,7 @@ use crate::ServerTxPool;
 /// sending only to the peer relay.
 pub fn monitor_transactions(
 	dandelion_config: DandelionConfig,
-	tx_pool: DandelionTxPool,
+	tx_pool: Arc<RwLock<DandelionTxPool>>,
 	adapter: Arc<dyn DandelionAdapter>,
 	stop_state: Arc<StopState>,
 ) -> std::io::Result<thread::JoinHandle<()>> {
@@ -100,19 +97,19 @@ where
 
 fn process_fluff_phase(
 	dandelion_config: &DandelionConfig,
-	tx_pool: &DandelionTxPool,
+	tx_pool: &Arc<RwLock<DandelionTxPool>>,
 	adapter: &Arc<dyn DandelionAdapter>,
 ) -> Result<(), PoolError> {
 	// Take a write lock on the txpool for the duration of this processing.
-	let mut tx_pool = tx_pool.inner().write();
+	let mut tx_pool = tx_pool.write();
 
-	let all_entries = tx_pool.stempool.entries.clone();
+	let all_entries = tx_pool.inner().stempool.entries.clone();
 	if all_entries.is_empty() {
 		return Ok(());
 	}
 
 	let cutoff_secs = dandelion_config.aggregation_secs;
-	let cutoff_entries = select_txs_cutoff(&tx_pool.stempool, cutoff_secs);
+	let cutoff_entries = select_txs_cutoff(&tx_pool.inner().stempool, cutoff_secs);
 
 	// If epoch is expired, fluff *all* outstanding entries in stempool.
 	// If *any* entry older than aggregation_secs (30s) then fluff *all* entries.
@@ -121,12 +118,12 @@ fn process_fluff_phase(
 		return Ok(());
 	}
 
-	let header = tx_pool.chain_head()?;
+	let header = tx_pool.inner().chain_head()?;
 
 	let fluffable_txs = {
-		let txpool_tx = tx_pool.txpool.all_transactions_aggregate(None)?;
+		let txpool_tx = tx_pool.inner().txpool.all_transactions_aggregate(None)?;
 		let txs: Vec<_> = all_entries.into_iter().map(|x| x.tx).collect();
-		tx_pool.stempool.validate_raw_txs(
+		tx_pool.inner().stempool.validate_raw_txs(
 			&txs,
 			txpool_tx,
 			&header,
@@ -142,19 +139,21 @@ fn process_fluff_phase(
 	let agg_tx = transaction::aggregate(&fluffable_txs)?;
 	agg_tx.validate(transaction::Weighting::AsTransaction)?;
 
-	tx_pool.add_to_pool(TxSource::Fluff, agg_tx, false, &header)?;
+	tx_pool
+		.inner()
+		.add_to_pool(TxSource::Fluff, agg_tx, false, &header)?;
 	Ok(())
 }
 
 fn process_expired_entries(
 	dandelion_config: &DandelionConfig,
-	tx_pool: &DandelionTxPool,
+	tx_pool: &Arc<RwLock<DandelionTxPool>>,
 ) -> Result<(), PoolError> {
 	// Take a write lock on the txpool for the duration of this processing.
-	let mut tx_pool = tx_pool.inner().write();
+	let mut tx_pool = tx_pool.write();
 
 	let embargo_secs = dandelion_config.embargo_secs + thread_rng().gen_range(0, 31);
-	let expired_entries = select_txs_cutoff(&tx_pool.stempool, embargo_secs);
+	let expired_entries = select_txs_cutoff(&tx_pool.inner().stempool, embargo_secs);
 
 	if expired_entries.is_empty() {
 		return Ok(());
@@ -162,11 +161,14 @@ fn process_expired_entries(
 
 	debug!("dand_mon: Found {} expired txs.", expired_entries.len());
 
-	let header = tx_pool.chain_head()?;
+	let header = tx_pool.inner().chain_head()?;
 
 	for entry in expired_entries {
 		let txhash = entry.tx.hash();
-		match tx_pool.add_to_pool(TxSource::EmbargoExpired, entry.tx, false, &header) {
+		match tx_pool
+			.inner()
+			.add_to_pool(TxSource::EmbargoExpired, entry.tx, false, &header)
+		{
 			Ok(_) => info!(
 				"dand_mon: embargo expired for {}, fluffed successfully.",
 				txhash

@@ -32,10 +32,24 @@ use grin_util::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+// Implement Clone for TransactionPool
+impl<B: BlockChain + Clone, P: PoolAdapter + Clone> Clone for TransactionPool<B, P> {
+	fn clone(&self) -> Self {
+		TransactionPool {
+			config: self.config.clone(),
+			txpool: self.txpool.clone(),
+			stempool: self.stempool.clone(),
+			reorg_cache: Arc::new(RwLock::new(self.reorg_cache.read().clone())),
+			blockchain: self.blockchain.clone(),
+			adapter: self.adapter.clone(),
+		}
+	}
+}
+
 /// Transaction pool implementation.
 pub struct TransactionPool<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	/// Pool Config
@@ -54,7 +68,7 @@ where
 
 impl<B, P> TransactionPool<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	/// Create a new transaction pool

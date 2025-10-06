@@ -32,15 +32,14 @@ use grin_util::RwLock;
 use std::sync::Weak;
 
 /// Main interface into all node API functions.
-/// Node APIs are split into two seperate blocks of functionality
+/// Node APIs are split into two separate blocks of functionality
 /// called the ['Owner'](struct.Owner.html) and ['Foreign'](struct.Foreign.html) APIs
 ///
 /// Methods in this API are intended to be 'single use'.
 ///
-
 pub struct Foreign<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	pub chain: Weak<Chain>,
@@ -50,7 +49,7 @@ where
 
 impl<B, P> Foreign<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	/// Create a new API instance with the chain, transaction pool, peers and `sync_state`. All subsequent
@@ -64,7 +63,6 @@ where
 	/// # Returns
 	/// * An instance of the Node holding references to the current chain, transaction pool, peers and sync_state.
 	///
-
 	pub fn new(
 		chain: Weak<Chain>,
 		tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
@@ -90,7 +88,6 @@ where
 	/// * A [`BlockHeaderPrintable`](types/struct.BlockHeaderPrintable.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_header(
 		&self,
 		height: Option<u64>,
@@ -117,7 +114,6 @@ where
 	/// * A [`BlockPrintable`](types/struct.BlockPrintable.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_block(
 		&self,
 		height: Option<u64>,
@@ -147,7 +143,7 @@ where
 	/// # Arguments
 	/// * `start_height` - starting height to lookup.
 	/// * `end_height` - ending height to to lookup.
-	/// * 'max` - The max number of blocks to return.
+	/// * `max` - The max number of blocks to return.
 	///   Note this is overriden with BLOCK_TRANSFER_LIMIT if BLOCK_TRANSFER_LIMIT is exceeded
 	///
 	/// # Returns
@@ -155,7 +151,6 @@ where
 	/// * A [`BlockListing`](types/struct.BlockListing.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_blocks(
 		&self,
 		start_height: u64,
@@ -176,7 +171,6 @@ where
 	/// * A [`Version`](types/struct.Version.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_version(&self) -> Result<Version, Error> {
 		let version_handler = VersionHandler {
 			chain: self.chain.clone(),
@@ -191,7 +185,6 @@ where
 	/// * A [`Tip`](types/struct.Tip.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_tip(&self) -> Result<Tip, Error> {
 		let chain_handler = ChainHandler {
 			chain: self.chain.clone(),
@@ -215,7 +208,6 @@ where
 	/// * A [`LocatedTxKernel`](types/struct.LocatedTxKernel.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_kernel(
 		&self,
 		excess: String,
@@ -245,7 +237,6 @@ where
 	/// * An [`OutputPrintable`](types/struct.OutputPrintable.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_outputs(
 		&self,
 		commits: Option<Vec<String>>,
@@ -279,7 +270,6 @@ where
 	/// * An [`OutputListing`](types/struct.OutputListing.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_unspent_outputs(
 		&self,
 		start_index: u64,
@@ -304,7 +294,6 @@ where
 	/// * An [`OutputListing`](types/struct.OutputListing.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_pmmr_indices(
 		&self,
 		start_block_height: u64,
@@ -323,7 +312,6 @@ where
 	/// * `usize`
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_pool_size(&self) -> Result<usize, Error> {
 		let pool_handler = PoolHandler {
 			tx_pool: self.tx_pool.clone(),
@@ -338,7 +326,6 @@ where
 	/// * `usize`
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_stempool_size(&self) -> Result<usize, Error> {
 		let pool_handler = PoolHandler {
 			tx_pool: self.tx_pool.clone(),
@@ -354,7 +341,6 @@ where
 	/// * A vector of [`PoolEntry`](types/struct.PoolEntry.html)
 	/// * or [`Error`](struct.Error.html) if an error is encountered.
 	///
-
 	pub fn get_unconfirmed_transactions(&self) -> Result<Vec<PoolEntry>, Error> {
 		let pool_handler = PoolHandler {
 			tx_pool: self.tx_pool.clone(),

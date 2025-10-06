@@ -108,8 +108,8 @@ pub struct PoolConfig {
 	#[serde(default = "default_accept_fee_base")]
 	pub accept_fee_base: u64,
 
-	// Reorg cache retention period in minute.
-	// The reorg cache repopulates local mempool in a reorg scenario.
+	/// Reorg cache retention period in minute.
+	/// The reorg cache repopulates local mempool in a reorg scenario.
 	#[serde(default = "default_reorg_cache_period")]
 	pub reorg_cache_period: u32,
 
@@ -126,6 +126,10 @@ pub struct PoolConfig {
 	/// blocks.
 	#[serde(default = "default_mineable_max_weight")]
 	pub mineable_max_weight: u64,
+
+	/// Minimum fee rate for transactions to be accepted by the pool.
+	#[serde(default = "default_min_fee_rate")]
+	pub min_fee_rate: u64,
 }
 
 impl Default for PoolConfig {
@@ -136,6 +140,7 @@ impl Default for PoolConfig {
 			max_pool_size: default_max_pool_size(),
 			max_stempool_size: default_max_stempool_size(),
 			mineable_max_weight: default_mineable_max_weight(),
+			min_fee_rate: default_min_fee_rate(),
 		}
 	}
 }
@@ -144,17 +149,25 @@ impl Default for PoolConfig {
 pub fn default_accept_fee_base() -> u64 {
 	DEFAULT_ACCEPT_FEE_BASE
 }
+
 fn default_reorg_cache_period() -> u32 {
 	30
 }
+
 fn default_max_pool_size() -> usize {
-	50_000
+	1000
 }
+
 fn default_max_stempool_size() -> usize {
-	50_000
+	1000
 }
+
 fn default_mineable_max_weight() -> u64 {
 	consensus::MAX_BLOCK_WEIGHT
+}
+
+fn default_min_fee_rate() -> u64 {
+	1000
 }
 
 /// Represents a single entry in the pool.
@@ -254,7 +267,7 @@ impl From<transaction::Error> for PoolError {
 	fn from(e: transaction::Error) -> PoolError {
 		match e {
 			transaction::Error::InvalidNRDRelativeHeight => PoolError::NRDKernelRelativeHeight,
-			e @ _ => PoolError::InvalidTx(e),
+			e => PoolError::InvalidTx(e),
 		}
 	}
 }

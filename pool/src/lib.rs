@@ -34,12 +34,13 @@ mod pool;
 pub mod transaction_pool;
 pub mod types;
 
+pub use self::pool::{
+	DandelionAdapter, DandelionTxPool, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool,
+};
+pub use self::transaction_pool::TransactionPool;
 pub use self::types::{
 	BlockChain, DandelionConfig, PoolAdapter, PoolConfig, PoolEntry, PoolError, TxSource,
 };
-
-pub use crate::pool::Pool;
-pub use crate::transaction_pool::TransactionPool;
 
 use grin_core::core::{BlockHeader, Transaction};
 use grin_p2p::types::PeerInfo;

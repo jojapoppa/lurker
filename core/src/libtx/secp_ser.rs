@@ -19,7 +19,7 @@ use grin_util::{from_hex, ToHex};
 use keychain::BlindingFactor;
 use serde::{Deserialize, Deserializer, Serializer};
 
-/// Serializes a secp PublicKey to and from hex
+// Serializes a secp PublicKey to and from hex
 pub mod pubkey_serde {
 	use grin_util::secp::key::PublicKey;
 	use grin_util::{from_hex, static_secp_instance, ToHex};
@@ -51,7 +51,7 @@ pub mod pubkey_serde {
 	}
 }
 
-/// Serializes an Option<secp::Signature> to and from hex
+// Serializes an Option<secp::Signature> to and from hex
 pub mod option_sig_serde {
 	use grin_util::{from_hex, secp, static_secp_instance, ToHex};
 	use serde::de::Error;
@@ -97,7 +97,7 @@ pub mod option_sig_serde {
 	}
 }
 
-/// Serializes an Option<secp::SecretKey> to and from hex
+// Serializes an Option<secp::SecretKey> to and from hex
 pub mod option_seckey_serde {
 	use grin_util::{from_hex, secp, static_secp_instance, ToHex};
 	use serde::de::Error;
@@ -142,7 +142,7 @@ pub mod option_seckey_serde {
 	}
 }
 
-/// Serializes a secp::Signature to and from hex
+// Serializes a secp::Signature to and from hex
 pub mod sig_serde {
 	use grin_util::{from_hex, secp, static_secp_instance, ToHex};
 	use serde::de::Error;
@@ -178,7 +178,7 @@ pub mod sig_serde {
 	}
 }
 
-/// Serializes an Option<secp::Commitment> to and from hex
+// Serializes an Option<secp::Commitment> to and from hex
 pub mod option_commitment_serde {
 	use grin_util::secp::pedersen::Commitment;
 	use grin_util::{from_hex, ToHex};
@@ -209,6 +209,7 @@ pub mod option_commitment_serde {
 		})
 	}
 }
+
 /// Creates a BlindingFactor from a hex string
 pub fn blind_from_hex<'de, D>(deserializer: D) -> Result<BlindingFactor, D::Error>
 where
@@ -348,6 +349,9 @@ pub mod opt_string_or_u64 {
 		deserializer.deserialize_any(Visitor)
 	}
 }
+
+// Make static_secp_instance public
+pub use grin_util::static_secp_instance;
 
 // Test serialization methods of components that are being used
 #[cfg(test)]

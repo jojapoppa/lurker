@@ -42,4 +42,6 @@ pub mod mining;
 pub use common::stats::{DiffBlock, PeerStats, ServerStats, StratumStats, WorkerStats};
 pub use common::types::{ServerConfig, StratumServerConfig};
 pub use grin::server::Server;
-pub use pool::{DandelionAdapter, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool};
+pub use grin_pool::{
+	DandelionAdapter, DandelionTxPool, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool,
+};

@@ -30,7 +30,7 @@ use std::sync::Weak;
 /// GET /v1/pool
 pub struct PoolInfoHandler<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
@@ -38,7 +38,7 @@ where
 
 impl<B, P> Handler for PoolInfoHandler<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	fn get(&self, _req: Request<Body>) -> ResponseFuture {
@@ -53,7 +53,7 @@ where
 
 pub struct PoolHandler<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
@@ -61,7 +61,7 @@ where
 
 impl<B, P> PoolHandler<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	pub fn get_pool_size(&self) -> Result<usize, Error> {
@@ -91,7 +91,7 @@ where
 			tx.kernels().len(),
 		);
 
-		//  Push to tx pool.
+		// Push to tx pool.
 		let mut tx_pool = pool_arc.write();
 		let header = tx_pool
 			.blockchain
@@ -103,20 +103,11 @@ where
 		Ok(())
 	}
 }
+
 /// Dummy wrapper for the hex-encoded serialized transaction.
 #[derive(Serialize, Deserialize)]
 struct TxWrapper {
 	tx_hex: String,
-}
-
-/// Push new transaction to our local transaction pool.
-/// POST /v1/pool/push_tx
-pub struct PoolPushHandler<B, P>
-where
-	B: BlockChain,
-	P: PoolAdapter,
-{
-	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
 }
 
 async fn update_pool<B, P>(
@@ -124,7 +115,7 @@ async fn update_pool<B, P>(
 	req: Request<Body>,
 ) -> Result<(), Error>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	let pool = w(&pool)?;
@@ -150,7 +141,7 @@ where
 		tx.kernels().len(),
 	);
 
-	//  Push to tx pool.
+	// Push to tx pool.
 	let mut tx_pool = pool.write();
 	let header = tx_pool
 		.blockchain
@@ -162,9 +153,19 @@ where
 	Ok(())
 }
 
+/// Push new transaction to our local transaction pool.
+/// POST /v1/pool/push_tx
+pub struct PoolPushHandler<B, P>
+where
+	B: BlockChain + Clone,
+	P: PoolAdapter,
+{
+	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+}
+
 impl<B, P> Handler for PoolPushHandler<B, P>
 where
-	B: BlockChain + 'static,
+	B: BlockChain + Clone + 'static,
 	P: PoolAdapter + 'static,
 {
 	fn post(&self, req: Request<Body>) -> ResponseFuture {

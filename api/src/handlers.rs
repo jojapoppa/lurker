@@ -63,7 +63,7 @@ pub fn node_apis<B, P>(
 	stop_state: Arc<StopState>,
 ) -> Result<(), Error>
 where
-	B: BlockChain + 'static,
+	B: BlockChain + Clone + 'static,
 	P: PoolAdapter + 'static,
 {
 	let mut router = Router::new();
@@ -192,7 +192,7 @@ impl crate::router::Handler for OwnerAPIHandlerV2 {
 /// V2 API Handler/Wrapper for foreign functions
 pub struct ForeignAPIHandlerV2<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	pub chain: Weak<Chain>,
@@ -202,7 +202,7 @@ where
 
 impl<B, P> ForeignAPIHandlerV2<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	/// Create a new foreign API handler for GET methods
@@ -221,7 +221,7 @@ where
 
 impl<B, P> crate::router::Handler for ForeignAPIHandlerV2<B, P>
 where
-	B: BlockChain + 'static,
+	B: BlockChain + Clone + 'static,
 	P: PoolAdapter + 'static,
 {
 	fn post(&self, req: Request<Body>) -> ResponseFuture {

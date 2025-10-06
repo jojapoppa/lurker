@@ -988,7 +988,7 @@ pub trait ForeignRpc: Sync + Send {
 
 impl<B, P> ForeignRpc for Foreign<B, P>
 where
-	B: BlockChain,
+	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	fn get_header(
