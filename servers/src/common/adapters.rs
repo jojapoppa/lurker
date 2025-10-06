@@ -13,21 +13,30 @@
 // limitations under the License.
 
 use bincode;
-use chrono::Utc;
-use grin_p2p::types::{NetAdapter, PeerInfo, ReasonForBan}; // Added NetAdapter
-use grin_p2p::Peers;
+use chrono::prelude::{DateTime, Utc};
+use grin_core::consensus::Difficulty;
+use grin_core::core::pmmr::segment::Segment;
+use grin_p2p::types::{
+	BitmapChunk, NetAdapter, PeerAddr, PeerInfo, RangeProof, ReasonForBan, SegmentIdentifier,
+	TxHashSetRead, TxKernel,
+};
+use grin_p2p::{ChainAdapter, Peers};
 use log::{error, trace, warn};
 use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
+use std::fs::File;
+use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::thread;
 
 use crate::chain;
-use crate::chain::SyncState;
+use crate::chain::{Options, SyncState};
 use crate::common::hooks::NetEvents;
 use crate::common::types::ServerConfig;
 use crate::core::core::hash::{Hash, Hashed};
-use crate::core::core::{Block, BlockHeader, BlockSums, Inputs, OutputIdentifier, Transaction};
+use crate::core::core::{
+	Block, BlockHeader, BlockSums, CompactBlock, Inputs, OutputIdentifier, Transaction,
+};
 use crate::pool;
 use crate::pool::{
 	BlockChain, Pool, PoolAdapter, PoolEntry, PoolError, PoolToNetMessages, TxSource,
@@ -572,7 +581,7 @@ impl DandelionAdapter for ChainToPoolAndNetAdapter {
 pub struct NetToChainAdapter {
 	chain: Arc<chain::Chain>,
 	sync_state: Arc<SyncState>,
-	tx_pool: Arc<RwLock<ServerTxPool>>,
+	tx_pool: ServerTxPool,
 	config: ServerConfig,
 	net_hooks: Vec<Box<dyn NetEvents + Send + Sync>>,
 	peers: Option<Arc<Peers>>,
@@ -583,7 +592,7 @@ impl NetToChainAdapter {
 	pub fn new(
 		sync_state: Arc<SyncState>,
 		chain: Arc<chain::Chain>,
-		tx_pool: Arc<RwLock<ServerTxPool>>,
+		tx_pool: ServerTxPool,
 		config: ServerConfig,
 		net_hooks: Vec<Box<dyn NetEvents + Send + Sync>>,
 	) -> NetToChainAdapter {
@@ -653,20 +662,269 @@ impl grin_p2p::BlockChain for NetToChainAdapter {
 
 impl PoolToNetMessages for NetToChainAdapter {
 	fn tx_received(&self, peer: &PeerInfo, tx: Transaction, header: &BlockHeader) {
-		let tx_pool = self.tx_pool.write();
+		let tx_pool = self.tx_pool.clone();
 		let peer = peer.clone();
 		let header = header.clone();
 		thread::spawn(move || {
+			let mut lock = tx_pool.write();
 			let entry = PoolEntry {
 				src: TxSource::Peer(peer.addr.0),
 				tx,
 				tx_at: Utc::now(),
 			};
-			let res = tx_pool.add_to_pool(entry.src, entry.tx, false, &header);
+			let res = lock.add_to_pool(entry.src, entry.tx, false, &header);
 			if let Err(e) = res {
 				warn!("Tx rejected from {:?}", peer);
 			}
 		});
+	}
+}
+
+impl ChainAdapter for NetToChainAdapter {
+	fn total_difficulty(&self) -> Result<Difficulty, chain::Error> {
+		self.chain.total_difficulty()
+	}
+
+	fn total_height(&self) -> Result<u64, chain::Error> {
+		self.chain.total_height()
+	}
+
+	fn transaction_received(&self, tx: Transaction, stem: bool) -> Result<bool, chain::Error> {
+		let mut lock = self.tx_pool.write();
+		let header = self.chain.head_header()?;
+		let entry = PoolEntry {
+			src: TxSource::Broadcast,
+			tx,
+			tx_at: Utc::now(),
+		};
+		lock.add_to_pool(entry.src, entry.tx, stem, &header)
+			.map_err(|e| chain::Error::Other(format!("failed to add transaction to pool: {}", e)))
+			.map(|_| true)
+	}
+
+	fn get_transaction(&self, kernel_hash: Hash) -> Option<Transaction> {
+		self.tx_pool.read().get_transaction(&kernel_hash)
+	}
+
+	fn tx_kernel_received(
+		&self,
+		kernel_hash: Hash,
+		peer_info: &PeerInfo,
+	) -> Result<bool, chain::Error> {
+		Ok(self
+			.tx_pool
+			.read()
+			.tx_kernel_received(&kernel_hash, peer_info)
+			.is_some())
+	}
+
+	fn block_received(
+		&self,
+		b: Block,
+		peer_info: &PeerInfo,
+		opts: Options,
+	) -> Result<bool, chain::Error> {
+		self.chain
+			.process_block(b, opts)
+			.map(|opt_tip| opt_tip.is_some())
+			.map_err(|e| chain::Error::Other(format!("block processing failed: {}", e)))
+	}
+
+	fn compact_block_received(
+		&self,
+		cb: CompactBlock,
+		peer_info: &PeerInfo,
+	) -> Result<bool, chain::Error> {
+		self.chain
+			.process_compact_block(cb, peer_info)
+			.map_err(|e| chain::Error::Other(format!("compact block processing failed: {}", e)))
+	}
+
+	fn header_received(&self, bh: BlockHeader, peer_info: &PeerInfo) -> Result<bool, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.header_received(bh, peer_info)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for header_received".to_string(),
+			))
+		}
+	}
+
+	fn headers_received(
+		&self,
+		headers: &[BlockHeader],
+		peer_info: &PeerInfo,
+	) -> Result<bool, chain::Error> {
+		self.chain
+			.process_block_headers(headers, peer_info)
+			.map_err(|e| chain::Error::Other(format!("headers processing failed: {}", e)))
+	}
+
+	fn locate_headers(&self, locator: &[Hash]) -> Result<Vec<BlockHeader>, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.locate_headers(locator)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for locate_headers".to_string(),
+			))
+		}
+	}
+
+	fn get_block(&self, h: Hash, _peer_info: &PeerInfo) -> Option<Block> {
+		self.chain.get_block(&h).ok()
+	}
+
+	fn txhashset_read(&self, h: Hash) -> Option<TxHashSetRead> {
+		self.chain.txhashset_read(h).ok()
+	}
+
+	fn txhashset_archive_header(&self) -> Result<BlockHeader, chain::Error> {
+		self.chain.txhashset_archive_header()
+	}
+
+	fn txhashset_receive_ready(&self) -> bool {
+		self.chain.txhashset_receive_ready()
+	}
+
+	fn txhashset_download_update(
+		&self,
+		start_time: DateTime<Utc>,
+		downloaded_size: u64,
+		total_size: u64,
+	) -> bool {
+		self.chain
+			.txhashset_download_update(start_time, downloaded_size, total_size)
+	}
+
+	fn txhashset_write(
+		&self,
+		h: Hash,
+		txhashset_data: File,
+		peer_info: &PeerInfo,
+	) -> Result<bool, chain::Error> {
+		self.chain.txhashset_write(h, txhashset_data, peer_info)
+	}
+
+	fn get_tmp_dir(&self) -> PathBuf {
+		self.chain.get_tmp_dir()
+	}
+
+	fn get_tmpfile_pathname(&self, tmpfile_name: String) -> PathBuf {
+		self.chain.get_tmpfile_pathname(tmpfile_name)
+	}
+
+	fn get_kernel_segment(
+		&self,
+		hash: Hash,
+		id: SegmentIdentifier,
+	) -> Result<Segment<TxKernel>, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.get_kernel_segment(hash, id)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for kernel segment".to_string(),
+			))
+		}
+	}
+
+	fn get_bitmap_segment(
+		&self,
+		hash: Hash,
+		id: SegmentIdentifier,
+	) -> Result<(Segment<BitmapChunk>, Hash), chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.get_bitmap_segment(hash, id)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for bitmap segment".to_string(),
+			))
+		}
+	}
+
+	fn get_output_segment(
+		&self,
+		hash: Hash,
+		id: SegmentIdentifier,
+	) -> Result<(Segment<OutputIdentifier>, Hash), chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.get_output_segment(hash, id)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for output segment".to_string(),
+			))
+		}
+	}
+
+	fn get_rangeproof_segment(
+		&self,
+		hash: Hash,
+		id: SegmentIdentifier,
+	) -> Result<Segment<RangeProof>, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.get_rangeproof_segment(hash, id)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for rangeproof segment".to_string(),
+			))
+		}
+	}
+
+	fn receive_bitmap_segment(
+		&self,
+		block_hash: Hash,
+		output_root: Hash,
+		segment: Segment<BitmapChunk>,
+	) -> Result<bool, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.receive_bitmap_segment(block_hash, output_root, segment)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for bitmap segment".to_string(),
+			))
+		}
+	}
+
+	fn receive_output_segment(
+		&self,
+		block_hash: Hash,
+		bitmap_root: Hash,
+		segment: Segment<OutputIdentifier>,
+	) -> Result<bool, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.receive_output_segment(block_hash, bitmap_root, segment)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for output segment".to_string(),
+			))
+		}
+	}
+
+	fn receive_rangeproof_segment(
+		&self,
+		block_hash: Hash,
+		segment: Segment<RangeProof>,
+	) -> Result<bool, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.receive_rangeproof_segment(block_hash, segment)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for rangeproof segment".to_string(),
+			))
+		}
+	}
+
+	fn receive_kernel_segment(
+		&self,
+		block_hash: Hash,
+		segment: Segment<TxKernel>,
+	) -> Result<bool, chain::Error> {
+		if let Some(peers) = &self.peers {
+			peers.receive_kernel_segment(block_hash, segment)
+		} else {
+			Err(chain::Error::Other(
+				"No peers available for kernel segment".to_string(),
+			))
+		}
 	}
 }
 

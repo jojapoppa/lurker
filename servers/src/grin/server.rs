@@ -1,8 +1,8 @@
 use crate::api;
 use crate::api::TLSConfig;
-use crate::chain::{SyncState, SyncStatus};
+use crate::chain::{Chain, SyncState, SyncStatus};
 use crate::common::hooks::init_net_hooks;
-use crate::common::types::Error;
+use crate::common::types::{Error, ServerConfig};
 use crate::common::{adapters, stats};
 use crate::core::core::hash::Hashed;
 use crate::core::core::{Block, Transaction};
@@ -13,7 +13,7 @@ use crate::core::ser::ProtocolVersion;
 use crate::grin::dandelion_monitor;
 use crate::grin::seed;
 use crate::grin::sync;
-use crate::p2p::Capabilities;
+use crate::p2p::{Capabilities, Seeding, Server as P2PServer}; // Renamed Server to P2PServer
 use crate::pool;
 use crate::util::file::get_first_line;
 use crate::util::StopState;
@@ -26,9 +26,9 @@ pub type ServerTxPool =
 	Arc<RwLock<pool::TransactionPool<adapters::PoolToChainAdapter, adapters::PoolToNetAdapter>>>;
 
 pub struct Server {
-	pub config: types::ServerConfig,
-	pub p2p: Arc<p2p::Server>,
-	pub chain: Arc<chain::Chain>,
+	pub config: ServerConfig,
+	pub p2p: Arc<P2PServer>, // Updated to P2PServer
+	pub chain: Arc<Chain>,
 	pub tx_pool: ServerTxPool,
 	pub sync_state: Arc<SyncState>,
 	pub state_info: stats::ServerStateInfo,
@@ -40,12 +40,12 @@ pub struct Server {
 }
 
 impl Server {
-	fn one_grin_at_a_time(config: &types::ServerConfig) -> Result<File, Error> {
+	fn one_grin_at_a_time(config: &ServerConfig) -> Result<File, Error> {
 		Ok(File::create(&config.db_root.join("grin.lock"))?)
 	}
 
 	pub fn new(
-		config: types::ServerConfig,
+		config: ServerConfig,
 		stop_state: Option<Arc<StopState>>,
 		api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>),
 	) -> Result<Server, Error> {
@@ -78,7 +78,7 @@ impl Server {
 
 		info!("Starting server, genesis block: {}", genesis.hash());
 
-		let shared_chain = Arc::new(chain::Chain::init(
+		let shared_chain = Arc::new(Chain::init(
 			config.db_root.clone(),
 			pool_adapter.clone(),
 			genesis.clone(),
@@ -108,7 +108,8 @@ impl Server {
 		};
 		debug!("Capabilities: {:?}", capabilities);
 
-		let p2p_server = Arc::new(p2p::Server::new(
+		let p2p_server = Arc::new(P2PServer::new(
+			// Updated to P2PServer
 			&config.db_root,
 			capabilities,
 			config.p2p_config.clone(),
@@ -123,13 +124,13 @@ impl Server {
 
 		let mut connect_thread = None;
 
-		if config.p2p_config.seeding_type != p2p::Seeding::Programmatic {
+		if config.p2p_config.seeding_type != Seeding::Programmatic {
 			let seed_list = match config.p2p_config.seeding_type {
-				p2p::Seeding::None => {
+				Seeding::None => {
 					warn!("No seed configured, will stay solo until connected to");
 					seed::predefined_seeds(vec![])
 				}
-				p2p::Seeding::List => match &config.p2p_config.seeds {
+				Seeding::List => match &config.p2p_config.seeds {
 					Some(seeds) => seed::predefined_seeds(seeds.peers.clone()),
 					None => {
 						return Err(Error::Configuration(
@@ -137,7 +138,7 @@ impl Server {
 						));
 					}
 				},
-				p2p::Seeding::DNSSeed => seed::default_dns_seeds(),
+				Seeding::DNSSeed => seed::default_dns_seeds(),
 				_ => unreachable!(),
 			};
 

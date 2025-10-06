@@ -23,17 +23,19 @@ use p2p::{msg::PeerAddrs, P2PConfig};
 use rand::prelude::*;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::str::FromStr;
 use std::sync::{mpsc, Arc};
 use std::{cmp, thread, time};
 use tokio::net::UnixStream;
 use tokio::runtime::Runtime;
-use yggdrasilctl::Endpoint;
+use yggdrasilctl::{Endpoint, PeerEntry}; // Added PeerEntry
 
 use crate::core::consensus::Difficulty;
 use crate::core::global;
 use crate::p2p;
 use crate::p2p::types::PeerAddr;
 use crate::util::StopState;
+use grin_p2p::ChainAdapter;
 use log::{debug, error, trace, warn};
 
 // Hardcoded Yggdrasil peers (example; replace with actual known peers)
@@ -98,8 +100,8 @@ pub fn connect_and_monitor(
 
 				// Ping connected peers every 10s
 				if Utc::now() - prev_ping > Duration::seconds(10) {
-					let total_diff = peers.total_difficulty();
-					let total_height = peers.total_height();
+					let total_diff = peers.adapter.total_difficulty();
+					let total_height = peers.adapter.total_height();
 					if let (Ok(total_diff), Ok(total_height)) = (total_diff, total_height) {
 						peers.check_all(total_diff, total_height);
 						prev_ping = Utc::now();
@@ -191,7 +193,7 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: P2PConfig, tx: mpsc::Sender<Pee
 						p.info.addr,
 					);
 					let addr = p.info.addr.0.to_string();
-					if let Err(e) = endpoint.add_peer(&format!("tcp://{}", addr), None).await {
+					if let Err(e) = endpoint.add_peer(format!("tcp://{}", addr), None).await {
 						warn!("Failed to add Yggdrasil peer {}: {:?}", addr, e);
 					} else {
 						let _ = p.send_peer_request(p2p::Capabilities::PEER_LIST);
@@ -202,7 +204,10 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: P2PConfig, tx: mpsc::Sender<Pee
 				if let Ok(peer_list) = endpoint.get_peers().await {
 					for peer in peer_list {
 						let addr = PeerAddr(SocketAddr::new(
-							IpAddr::V6(Ipv6Addr::from_str(&peer).unwrap_or(Ipv6Addr::UNSPECIFIED)),
+							IpAddr::V6(
+								Ipv6Addr::from_str(peer.address.as_str())
+									.unwrap_or(Ipv6Addr::UNSPECIFIED),
+							),
 							config.port,
 						));
 						if !connected_peers.contains(&addr) {
@@ -327,7 +332,7 @@ fn listen_for_addrs(
                     thread::Builder::new()
                         .name("peer_connect".to_string())
                         .spawn(move || {
-                            if let Err(e) = endpoint.add_peer(&format!("tcp://{}", addr_str), None).block_on() {
+                            if let Err(e) = endpoint.add_peer(format!("tcp://{}", addr_str), None).await {
                                 warn!("Failed to add Yggdrasil peer {}: {:?}", addr_str, e);
                                 let _ = peers_c.update_state(addr, p2p::State::Defunct);
                             } else {
@@ -381,7 +386,8 @@ pub fn default_dns_seeds() -> Box<dyn Fn() -> Vec<PeerAddr> + Send> {
 							.map(|peer| {
 								PeerAddr(SocketAddr::new(
 									IpAddr::V6(
-										Ipv6Addr::from_str(&peer).unwrap_or(Ipv6Addr::UNSPECIFIED),
+										Ipv6Addr::from_str(peer.address.as_str())
+											.unwrap_or(Ipv6Addr::UNSPECIFIED),
 									),
 									3414, // Default port; adjust as needed
 								))
