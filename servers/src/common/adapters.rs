@@ -443,10 +443,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.head_header()
-			.map_err(|e| {
-				error!("ChainToPoolAndNetAdapter: failed to get head header, {}", e);
-				grin_p2p::Error::Other(format!("failed to get head header, {}", e))
-			})
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_block(&self, hash: &Hash) -> Result<Block, grin_p2p::Error> {
@@ -455,13 +452,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.get_block(hash)
-			.map_err(|e| {
-				error!(
-					"ChainToPoolAndNetAdapter: failed to get block {}, {}",
-					hash, e
-				);
-				grin_p2p::Error::Other(format!("failed to get block {}, {}", hash, e))
-			})
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, grin_p2p::Error> {
@@ -470,13 +461,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.get_block_header(hash)
-			.map_err(|e| {
-				error!(
-					"ChainToPoolAndNetAdapter: failed to get header {}, {}",
-					hash, e
-				);
-				grin_p2p::Error::Other(format!("failed to get header {}, {}", hash, e))
-			})
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_header_by_height(&self, height: u64) -> Result<BlockHeader, grin_p2p::Error> {
@@ -485,13 +470,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.get_header_by_height(height)
-			.map_err(|e| {
-				error!(
-					"ChainToPoolAndNetAdapter: failed to get header at height {}, {}",
-					height, e
-				);
-				grin_p2p::Error::Other(format!("failed to get header at height {}, {}", height, e))
-			})
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_block_id_by_height(&self, height: u64) -> Result<Hash, grin_p2p::Error> {
@@ -501,16 +480,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.expect("Failed to upgrade chain ref")
 			.get_header_by_height(height)
 			.map(|h| h.hash())
-			.map_err(|e| {
-				error!(
-					"ChainToPoolAndNetAdapter: failed to get block hash at height {}, {}",
-					height, e
-				);
-				grin_p2p::Error::Other(format!(
-					"failed to get block hash at height {}, {}",
-					height, e
-				))
-			})
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 }
 
@@ -624,50 +594,34 @@ impl NetToChainAdapter {
 
 impl grin_p2p::BlockChain for NetToChainAdapter {
 	fn chain_head(&self) -> Result<BlockHeader, grin_p2p::Error> {
-		self.chain.head_header().map_err(|e| {
-			error!("NetToChainAdapter: failed to get head header, {}", e);
-			grin_p2p::Error::Other(format!("failed to get head header, {}", e))
-		})
+		self.chain
+			.head_header()
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_block(&self, hash: &Hash) -> Result<Block, grin_p2p::Error> {
-		self.chain.get_block(hash).map_err(|e| {
-			error!("NetToChainAdapter: failed to get block {}, {}", hash, e);
-			grin_p2p::Error::Other(format!("failed to get block {}, {}", hash, e))
-		})
+		self.chain
+			.get_block(hash)
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, grin_p2p::Error> {
-		self.chain.get_block_header(hash).map_err(|e| {
-			error!("NetToChainAdapter: failed to get header {}, {}", hash, e);
-			grin_p2p::Error::Other(format!("failed to get header {}, {}", hash, e))
-		})
+		self.chain
+			.get_block_header(hash)
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_header_by_height(&self, height: u64) -> Result<BlockHeader, grin_p2p::Error> {
-		self.chain.get_header_by_height(height).map_err(|e| {
-			error!(
-				"NetToChainAdapter: failed to get header at height {}, {}",
-				height, e
-			);
-			grin_p2p::Error::Other(format!("failed to get header at height {}, {}", height, e))
-		})
+		self.chain
+			.get_header_by_height(height)
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 
 	fn get_block_id_by_height(&self, height: u64) -> Result<Hash, grin_p2p::Error> {
 		self.chain
 			.get_header_by_height(height)
 			.map(|h| h.hash())
-			.map_err(|e| {
-				error!(
-					"NetToChainAdapter: failed to get block hash at height {}, {}",
-					height, e
-				);
-				grin_p2p::Error::Other(format!(
-					"failed to get block hash at height {}, {}",
-					height, e
-				))
-			})
+			.map_err(|e| grin_p2p::Error::ChainError(e))
 	}
 }
 
@@ -861,7 +815,7 @@ impl ChainAdapter for NetToChainAdapter {
 			peers.get_output_segment(hash, id)
 		} else {
 			Err(chain::Error::Other(
-				"No peers available for output segment".to.string(),
+				"No peers available for output segment".to_string(),
 			))
 		}
 	}
@@ -919,7 +873,7 @@ impl ChainAdapter for NetToChainAdapter {
 			peers.receive_rangeproof_segment(block_hash, segment)
 		} else {
 			Err(chain::Error::Other(
-				"No peers available for rangeproof segment".to.string(),
+				"No peers available for rangeproof segment".to_string(),
 			))
 		}
 	}
