@@ -1435,6 +1435,7 @@ dependencies = [
 name = "grin_pool"
 version = "5.4.0-alpha.0"
 dependencies = [
+ "bincode",
  "blake2-rfc",
  "chrono",
  "grin_core",
@@ -1446,7 +1447,10 @@ dependencies = [
  "rand 0.6.5",
  "serde",
  "serde_derive",
+ "serde_json",
  "thiserror 1.0.69",
+ "tokio 1.47.1",
+ "yggdrasilctl 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1496,7 +1500,7 @@ dependencies = [
  "tokio 1.47.1",
  "tokio-util 0.7.16",
  "walkdir",
- "yggdrasilctl",
+ "yggdrasilctl 1.2.3 (git+https://github.com/jojapoppa/yggdrasilctl.git?branch=main)",
 ]
 
 [[package]]
@@ -1598,7 +1602,7 @@ dependencies = [
  "thiserror 1.0.69",
  "url",
  "yggdrasil-keys",
- "yggdrasilctl",
+ "yggdrasilctl 1.2.3 (git+https://github.com/jojapoppa/yggdrasilctl.git?branch=main)",
 ]
 
 [[package]]
@@ -1750,7 +1754,7 @@ dependencies = [
  "tokio 1.47.1",
  "uuid",
  "x25519-dalek 0.6.0",
- "yggdrasilctl",
+ "yggdrasilctl 1.2.3 (git+https://github.com/jojapoppa/yggdrasilctl.git?branch=main)",
 ]
 
 [[package]]
@@ -5295,6 +5299,18 @@ dependencies = [
  "ipnet",
  "rand_core 0.6.4",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "yggdrasilctl"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b52c3bf06f29f149dc9537120725fba102ff8c55a816ab2dc3b82d351a52d00"
+dependencies = [
+ "maybe-async",
+ "serde",
+ "serde_json",
+ "tokio 1.47.1",
 ]
 
 [[package]]

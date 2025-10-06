@@ -37,9 +37,9 @@ use grin_util as util;
 
 pub mod common;
 pub mod grin;
-pub use common::adapters::DandelionAdapter;
 pub mod mining;
 
-pub use crate::common::stats::{DiffBlock, PeerStats, ServerStats, StratumStats, WorkerStats};
-pub use crate::common::types::{ServerConfig, StratumServerConfig};
-pub use crate::grin::server::{Server, ServerTxPool};
+pub use common::stats::{DiffBlock, PeerStats, ServerStats, StratumStats, WorkerStats};
+pub use common::types::{ServerConfig, StratumServerConfig};
+pub use grin::server::Server;
+pub use pool::{DandelionAdapter, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool};

@@ -20,6 +20,7 @@ use grin_core::core::pmmr::segment::{Segment, SegmentIdentifier};
 use grin_core::core::transaction::TxKernel;
 use grin_p2p::types::{NetAdapter, PeerAddr, PeerInfo, ReasonForBan, TxHashSetRead};
 use grin_p2p::{ChainAdapter, Peers};
+use grin_servers::ServerTxPool;
 use grin_util::secp::pedersen::RangeProof;
 use log::{error, trace, warn};
 use rand::seq::IteratorRandom;
@@ -31,7 +32,6 @@ use std::thread;
 use std::collections::HashMap;
 use serde_json::Value;
 
-use crate::ServerTxPool; // Added import
 use crate::chain;
 use crate::chain::{Options, SyncState};
 use crate::common::hooks::NetEvents;
@@ -665,11 +665,11 @@ impl PoolToNetMessages for NetToChainAdapter {
 
 impl ChainAdapter for NetToChainAdapter {
     fn total_difficulty(&self) -> Result<Difficulty, chain::Error> {
-        self.chain.total_difficulty()
+        self.chain.head().map(|tip| tip.total_difficulty)
     }
 
     fn total_height(&self) -> Result<u64, chain::Error> {
-        self.chain.total_height()
+        self.chain.head().map(|tip| tip.height)
     }
 
     fn transaction_received(&self, tx: Transaction, stem: bool) -> Result<bool, chain::Error> {

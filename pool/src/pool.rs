@@ -15,24 +15,374 @@
 //! Transaction pool implementation.
 //! Used for both the txpool and stempool layers in the pool.
 
-use self::core::core::hash::{Hash, Hashed};
-use self::core::core::id::{ShortId, ShortIdentifiable};
-use self::core::core::transaction;
-use self::core::core::{
-	Block, BlockHeader, BlockSums, Committed, OutputIdentifier, Transaction, TxKernel, Weighting,
-};
 use crate::types::{BlockChain, PoolAdapter, PoolEntry, PoolError, TxSource};
+use bincode;
 use chrono::prelude::*;
-use grin_core as core;
-use grin_util as util;
-use grin_util::RwLock;
+use grin_core::core::{
+	transaction, BlockHeader, BlockSums, Inputs, OutputIdentifier, Transaction, Weighting,
+};
+use grin_p2p::{DandelionAdapter, PeerInfo, Peers, PoolToNetMessages};
+use grin_util::static_secp_instance;
+use grin_util::{OneTime, RwLock};
+use rand::seq::IteratorRandom;
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use util::static_secp_instance;
+use std::sync::{Arc, Weak};
+use std::thread;
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
+use tokio::runtime::Runtime;
+use yggdrasilctl::Endpoint;
 
-/// Configuration for the transaction pool.
+// Newtype to wrap ServerTxPool with an extra Arc
+#[derive(Clone)]
+pub struct DandelionTxPool(pub Arc<ServerTxPool>);
+
+impl DandelionTxPool {
+	pub fn inner(&self) -> ServerTxPool {
+		Arc::clone(&self.0)
+	}
+}
+
+/// Implements the view of the chain required by the TransactionPool to
+/// operate. Mostly needed to break any direct lifecycle or implementation
+/// dependency between the pool and the chain.
+#[derive(Clone)]
+pub struct PoolToChainAdapter {
+	chain: OneTime<Weak<chain::Chain>>,
+}
+
+impl PoolToChainAdapter {
+	/// Create a new pool adapter
+	pub fn new() -> PoolToChainAdapter {
+		PoolToChainAdapter {
+			chain: OneTime::new(),
+		}
+	}
+
+	/// Set the pool adapter's chain. Should only be called once.
+	pub fn set_chain(&self, chain_ref: Arc<chain::Chain>) {
+		self.chain.init(Arc::downgrade(&chain_ref));
+	}
+
+	fn chain(&self) -> Arc<chain::Chain> {
+		self.chain
+			.borrow()
+			.upgrade()
+			.expect("Failed to upgrade the weak ref to our chain.")
+	}
+}
+
+impl BlockChain for PoolToChainAdapter {
+	fn chain_head(&self) -> Result<BlockHeader, PoolError> {
+		self.chain()
+			.head_header()
+			.map_err(|_| PoolError::Other("failed to get head_header".to_string()))
+	}
+
+	fn get_block_header(&self, hash: &core::hash::Hash) -> Result<BlockHeader, PoolError> {
+		self.chain()
+			.get_block_header(hash)
+			.map_err(|_| PoolError::Other("failed to get block_header".to_string()))
+	}
+
+	fn get_block_sums(&self, hash: &core::hash::Hash) -> Result<BlockSums, PoolError> {
+		self.chain()
+			.get_block_sums(hash)
+			.map_err(|_| PoolError::Other("failed to get block_sums".to_string()))
+	}
+
+	fn validate_tx(&self, tx: &Transaction) -> Result<(), PoolError> {
+		self.chain()
+			.validate_tx(tx)
+			.map_err(|_| PoolError::Other("failed to validate tx".to_string()))
+	}
+
+	fn validate_inputs(&self, inputs: &Inputs) -> Result<Vec<OutputIdentifier>, PoolError> {
+		self.chain()
+			.validate_inputs(inputs)
+			.map(|outputs| outputs.into_iter().map(|(out, _)| out).collect::<Vec<_>>())
+			.map_err(|_| PoolError::Other("failed to validate inputs".to_string()))
+	}
+
+	fn verify_coinbase_maturity(&self, inputs: &Inputs) -> Result<(), PoolError> {
+		self.chain()
+			.verify_coinbase_maturity(inputs)
+			.map_err(|_| PoolError::ImmatureCoinbase)
+	}
+
+	fn verify_tx_lock_height(&self, tx: &Transaction) -> Result<(), PoolError> {
+		self.chain()
+			.verify_tx_lock_height(tx)
+			.map_err(|_| PoolError::ImmatureTransaction)
+	}
+}
+
+/// To break the self-reference, we use PoolToNetAdapterAlt in the generic for TransactionPool.
+#[derive(Clone)]
+pub struct PoolToNetAdapter {
+	tx_pool: OneTime<Weak<DandelionTxPool>>,
+	peers: Option<Arc<Peers>>,
+}
+
+/// Type alias to break the cycle
+type PoolToNetAdapterAlt = PoolToNetAdapter;
+
+impl PoolToNetAdapter {
+	/// Create a new network adapter
+	pub fn new() -> PoolToNetAdapter {
+		PoolToNetAdapter {
+			tx_pool: OneTime::new(),
+			peers: None,
+		}
+	}
+
+	/// Set the pool adapter's tx_pool. Should only be called once.
+	pub fn set_tx_pool(&self, tx_pool_ref: DandelionTxPool) {
+		let weak_ref: Weak<DandelionTxPool> = Arc::downgrade(&Arc::new(tx_pool_ref));
+		self.tx_pool.init(weak_ref);
+	}
+
+	/// Initialize with peers
+	pub fn init(&self, peers: Arc<Peers>) {
+		self.peers = Some(peers);
+	}
+
+	/// Placeholder dummy adapter
+	pub fn dummy() -> PoolToNetAdapter {
+		PoolToNetAdapter {
+			tx_pool: OneTime::new(),
+			peers: None,
+		}
+	}
+
+	fn tx_pool(&self) -> ServerTxPool {
+		self.tx_pool
+			.borrow()
+			.upgrade()
+			.expect("Failed to upgrade the weak ref to our tx_pool.")
+			.inner()
+	}
+}
+
+impl PoolToNetMessages for PoolToNetAdapter {
+	fn tx_received(&self, peer: &PeerInfo, tx: Transaction, header: &BlockHeader) {
+		let tx_pool = self.tx_pool();
+		let peer = peer.clone();
+		let header = header.clone();
+		thread::spawn(move || {
+			// Acquire the transaction pool lock
+			let mut lock = tx_pool.write();
+			let entry = PoolEntry {
+				src: TxSource::Peer(peer.addr.0),
+				tx,
+				tx_at: Utc::now(),
+			};
+			let res = lock.add_to_pool(entry.src, entry.tx, false, &header);
+			if let Err(e) = res {
+				warn!("Tx rejected from {:?}", peer);
+			}
+		});
+	}
+}
+
+impl PoolAdapter for PoolToNetAdapter {
+	fn tx_accepted(&self, entry: &PoolEntry) {
+		let tx = entry.tx.clone();
+		let peers = self.peers.as_ref().map(|p| p.iter().connected());
+		let rt = Runtime::new().expect("Failed to create Tokio runtime");
+		rt.block_on(async {
+			let socket_path = "/run/yggdrasil.sock";
+			match UnixStream::connect(socket_path).await {
+				Ok(socket) => {
+					let mut endpoint = Endpoint::attach(socket).await;
+					let tx_bytes = match bincode::serialize(&tx) {
+						Ok(bytes) => bytes,
+						Err(e) => {
+							warn!("Failed to serialize tx {}: {:?}", tx.hash(), e);
+							return;
+						}
+					};
+					if let Some(peers_iter) = peers {
+						let peers_vec: Vec<_> = peers_iter.into_iter().collect();
+						let count = peers_vec.len();
+						for peer in peers_vec {
+							let addr = peer.info.addr.0.to_string();
+							let mut args = HashMap::new();
+							args.insert(
+								"uri".to_string(),
+								Value::String(format!("tcp://{}", addr)),
+							);
+							match endpoint.request_args::<()>("addPeer", args).await {
+								Ok(_) => {
+									trace!("Added Yggdrasil peer: {}", addr);
+								}
+								Err(e) => {
+									warn!("Failed to add Yggdrasil peer {}: {:?}", addr, e);
+									continue;
+								}
+							}
+							let socket = match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
+								Ok(socket) => socket,
+								Err(e) => {
+									warn!("Failed to bind UDP socket for peer {}: {:?}", addr, e);
+									continue;
+								}
+							};
+							if let Err(e) = socket.connect(peer.info.addr.0).await {
+								warn!("Failed to connect to Yggdrasil peer {}: {:?}", addr, e);
+								continue;
+							}
+							if let Err(e) = socket.send(&tx_bytes).await {
+								warn!("Failed to send tx {} to peer {}: {:?}", tx.hash(), addr, e);
+								continue;
+							}
+						}
+						warn!("Broadcasting tx {} to {} Yggdrasil peers", tx.hash(), count);
+					}
+				}
+				Err(e) => {
+					warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+				}
+			}
+		});
+	}
+
+	fn stem_tx_accepted(&self, entry: &PoolEntry) -> Result<(), PoolError> {
+		let tx = entry.tx.clone();
+		let peers = self.peers.as_ref().map(|p| p.iter().connected());
+		let rt = Runtime::new().map_err(|e| PoolError::Other(e.to_string()))?;
+		rt.block_on(async {
+			let socket_path = "/run/yggdrasil.sock";
+			match UnixStream::connect(socket_path).await {
+				Ok(socket) => {
+					let mut endpoint = Endpoint::attach(socket).await;
+					let dandelion_peer = peers
+						.and_then(|p| p.choose_random())
+						.ok_or_else(|| PoolError::Other("No peers available".to_string()))?;
+					let socket_addr = dandelion_peer.info.addr.0;
+					let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+						.await
+						.map_err(|e| PoolError::Other(e.to_string()))?;
+					socket
+						.connect(socket_addr)
+						.await
+						.map_err(|e| PoolError::Other(e.to_string()))?;
+					let tx_bytes =
+						bincode::serialize(&tx).map_err(|e| PoolError::Other(e.to_string()))?;
+					let mut args = HashMap::new();
+					args.insert(
+						"uri".to_string(),
+						Value::String(format!("tcp://{}", socket_addr)),
+					);
+					match endpoint.request_args::<()>("addPeer", args).await {
+						Ok(_) => {
+							trace!("Added Yggdrasil peer: {}", socket_addr);
+						}
+						Err(e) => {
+							warn!("Failed to add Yggdrasil peer {}: {:?}", socket_addr, e);
+							return Err(PoolError::Other(format!("Failed to add peer: {:?}", e)));
+						}
+					}
+					socket
+						.send(&tx_bytes)
+						.await
+						.map_err(|e| PoolError::Other(e.to_string()))?;
+					warn!(
+						"Relayed stem tx {} to Yggdrasil peer {}",
+						tx.hash(),
+						socket_addr
+					);
+					Ok(())
+				}
+				Err(e) => {
+					warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+					Err(PoolError::Other(e.to_string()))
+				}
+			}
+		})
+	}
+}
+
+impl DandelionAdapter for PoolToNetAdapter {
+	fn select_dandelion_peer(&self) -> Option<PeerInfo> {
+		self.peers.as_ref().and_then(|p| {
+			p.iter()
+				.connected()
+				.choose_random()
+				.map(|peer| peer.info.clone())
+		})
+	}
+
+	fn select_dandelionpp_peer(&self) -> Option<PeerInfo> {
+		self.select_dandelion_peer()
+	}
+
+	fn select_output_peer(&self, input_peer: &PeerInfo, is_stem: bool) -> Option<PeerInfo> {
+		if is_stem {
+			self.select_dandelion_peer()
+		} else {
+			self.peers.as_ref().and_then(|p| {
+				let filtered_peers: Vec<_> = p
+					.iter()
+					.connected()
+					.into_iter()
+					.filter(|p| p.info.addr != input_peer.addr)
+					.collect();
+				filtered_peers
+					.into_iter()
+					.choose(&mut thread_rng())
+					.map(|peer| peer.info.clone())
+			})
+		}
+	}
+
+	fn is_stem(&self) -> bool {
+		let mut rng = thread_rng();
+		rng.gen_bool(0.9) // 90% chance of stem phase
+	}
+
+	fn is_expired(&self) -> bool {
+		// TODO: Implement proper epoch expiration logic if needed
+		false
+	}
+
+	fn next_epoch(&self) {
+		// No-op for now
+	}
+}
+
+/// Blanket impl to allow using Arc<dyn DandelionAdapter>.
+impl<T: DandelionAdapter> DandelionAdapter for Arc<T> {
+	fn select_dandelion_peer(&self) -> Option<PeerInfo> {
+		(**self).select_dandelion_peer()
+	}
+
+	fn select_dandelionpp_peer(&self) -> Option<PeerInfo> {
+		(**self).select_dandelionpp_peer()
+	}
+
+	fn select_output_peer(&self, input_peer: &PeerInfo, is_stem: bool) -> Option<PeerInfo> {
+		(**self).select_output_peer(input_peer, is_stem)
+	}
+
+	fn is_stem(&self) -> bool {
+		(**self).is_stem()
+	}
+
+	fn is_expired(&self) -> bool {
+		(**self).is_expired()
+	}
+
+	fn next_epoch(&self) {
+		(**self).next_epoch()
+	}
+}
+
+// Configuration for the transaction pool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolConfig {
 	/// Maximum number of transactions allowed in the pool
@@ -133,6 +483,19 @@ where
 		self.txpool
 			.validate_raw_txs(txs, extra_tx, header, weighting)
 	}
+
+	pub fn tx_kernel_received(
+		&self,
+		kernel_hash: core::hash::Hash,
+		_peer_info: &PeerInfo,
+	) -> Option<Transaction> {
+		// Check txpool first
+		if let Some(tx) = self.txpool.retrieve_tx_by_kernel_hash(kernel_hash) {
+			return Some(tx);
+		}
+		// Then check stempool
+		self.stempool.retrieve_tx_by_kernel_hash(kernel_hash)
+	}
 }
 
 pub struct Pool<B>
@@ -165,7 +528,7 @@ where
 	}
 
 	/// Query the tx pool for an individual tx matching the given kernel hash.
-	pub fn retrieve_tx_by_kernel_hash(&self, hash: Hash) -> Option<Transaction> {
+	pub fn retrieve_tx_by_kernel_hash(&self, hash: core::hash::Hash) -> Option<Transaction> {
 		for x in &self.entries {
 			for k in x.tx.kernels() {
 				if k.hash() == hash {
@@ -182,10 +545,10 @@ where
 	/// The caller will need to validate that themselves.
 	pub fn retrieve_transactions(
 		&self,
-		hash: Hash,
+		hash: core::hash::Hash,
 		nonce: u64,
-		kern_ids: &[ShortId],
-	) -> (Vec<Transaction>, Vec<ShortId>) {
+		kern_ids: &[core::id::ShortId],
+	) -> (Vec<Transaction>, Vec<core::id::ShortId>) {
 		let mut txs = vec![];
 		let mut found_ids = vec![];
 
@@ -353,7 +716,7 @@ where
 			let mut candidate_txs = vec![];
 			if let Some(extra_tx) = extra_tx.clone() {
 				candidate_txs.push(extra_tx);
-			};
+			}
 			candidate_txs.extend(valid_txs.clone());
 			candidate_txs.push(tx.clone());
 
@@ -417,7 +780,7 @@ where
 		// Verify the kernel sums for the block_sums with the new tx applied,
 		// accounting for overage and offset.
 		let (utxo_sum, kernel_sum) =
-			(block_sums, tx as &dyn Committed).verify_kernel_sums(overage, offset)?;
+			(block_sums, tx as &dyn core::Committed).verify_kernel_sums(overage, offset)?;
 
 		Ok(BlockSums {
 			utxo_sum,
@@ -444,7 +807,7 @@ where
 	pub fn evict_transaction(&mut self) {
 		if let Some(evictable_transaction) = self.bucket_transactions(Weighting::NoLimit).last() {
 			self.entries.retain(|x| x.tx != *evictable_transaction);
-		};
+		}
 	}
 
 	/// Buckets consist of a vec of txs and track the aggregate fee_rate.
@@ -539,7 +902,7 @@ where
 		}
 
 		// Sort buckets by fee_rate (descending) and age (oldest first).
-		// Txs with highest fee_rate will be prioritied.
+		// Txs with highest fee_rate will be prioritized.
 		// Aggregation that increases the fee_rate of a bucket will prioritize the bucket.
 		// Oldest (based on pool insertion time) will then be prioritized.
 		tx_buckets.sort_unstable_by_key(|x| (Reverse(x.fee_rate), x.age_idx));
@@ -548,7 +911,7 @@ where
 	}
 
 	/// TODO - This is kernel based. How does this interact with NRD?
-	pub fn find_matching_transactions(&self, kernels: &[TxKernel]) -> Vec<Transaction> {
+	pub fn find_matching_transactions(&self, kernels: &[core::TxKernel]) -> Vec<Transaction> {
 		// While the inputs outputs can be cut-through the kernel will stay intact
 		// In order to deaggregate tx we look for tx with the same kernel
 		let mut found_txs = vec![];
@@ -568,7 +931,7 @@ where
 
 	/// Quick reconciliation step - we can evict any txs in the pool where
 	/// inputs or kernels intersect with the block.
-	pub fn reconcile_block(&mut self, block: &Block) {
+	pub fn reconcile_block(&mut self, block: &core::Block) {
 		// Filter txs in the pool based on the latest block.
 		// Reject any txs where we see a matching tx kernel in the block.
 		// Also reject any txs where we see a conflicting tx,
@@ -633,3 +996,5 @@ impl Bucket {
 		})
 	}
 }
+
+pub type ServerTxPool = TransactionPool<PoolToNetAdapterAlt, PoolToChainAdapter>;
