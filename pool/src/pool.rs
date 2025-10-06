@@ -18,8 +18,8 @@
 use crate::types::{BlockChain, PoolAdapter, PoolConfig, PoolEntry, PoolError, TxSource};
 use chrono::prelude::*;
 use grin_chain::Chain;
-use grin_core::core::hash::Hash;
-use grin_core::core::id;
+use grin_core::core::hash::{Hash, Hashed};
+use grin_core::core::id::{self, ShortIdentifiable};
 use grin_core::core::{
 	transaction, Block, BlockHeader, BlockSums, Committed, Inputs, OutputIdentifier, Transaction,
 	TxKernel, Weighting,
@@ -28,8 +28,10 @@ use grin_core::libtx::secp_ser::static_secp_instance;
 use grin_p2p::{PeerInfo, Peers};
 use grin_util::{OneTime, RwLock};
 use log::debug;
-use rand::seq::{IteratorRandom, SliceRandom};
-use rand::thread_rng;
+use rand::{
+	seq::{IteratorRandom, SliceRandom},
+	thread_rng, Rng,
+};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
@@ -48,8 +50,8 @@ pub trait DandelionAdapter {
 pub struct DandelionTxPool(pub Arc<ServerTxPool>);
 
 impl DandelionTxPool {
-	pub fn inner(&self) -> ServerTxPool {
-		(*self.0).clone()
+	pub fn inner(&self) -> Arc<ServerTxPool> {
+		Arc::clone(&self.0)
 	}
 }
 
@@ -126,7 +128,7 @@ pub struct PoolToNetAdapter {
 	peers: Option<Arc<Peers>>,
 }
 
-type PoolToNetAdapterAlt = PoolToNetAdapter;
+pub type PoolToNetAdapterAlt = PoolToNetAdapter;
 
 impl PoolToNetAdapter {
 	pub fn new() -> PoolToNetAdapter {
@@ -152,12 +154,11 @@ impl PoolToNetAdapter {
 		}
 	}
 
-	fn tx_pool(&self) -> ServerTxPool {
+	fn tx_pool(&self) -> Arc<ServerTxPool> {
 		self.tx_pool
 			.borrow()
 			.upgrade()
 			.expect("Failed to upgrade the weak ref to our tx_pool.")
-			.inner()
 	}
 }
 
@@ -289,12 +290,13 @@ impl<A: PoolAdapter, B: BlockChain> TransactionPool<A, B> {
 		} else {
 			None
 		};
+		self.apply_tx_to_block_sums(&entry.tx, header)?;
 		let pool = if stem {
 			&mut self.stempool
 		} else {
 			&mut self.txpool
 		};
-		pool.add_to_pool(entry, extra_tx, header)?;
+		pool.add_to_pool(entry.clone(), extra_tx, header, self.config.min_fee_rate)?;
 		self.adapter.tx_accepted(&entry);
 		Ok(())
 	}
@@ -313,8 +315,45 @@ impl<A: PoolAdapter, B: BlockChain> TransactionPool<A, B> {
 		header: &BlockHeader,
 		weighting: Weighting,
 	) -> Result<Vec<Transaction>, PoolError> {
-		self.txpool
-			.validate_raw_txs(txs, extra_tx, header, weighting)
+		let mut valid_txs = vec![];
+		for tx in txs {
+			let mut candidate_txs = vec![];
+			if let Some(extra_tx) = extra_tx.clone() {
+				candidate_txs.push(extra_tx);
+			}
+			candidate_txs.extend(valid_txs.clone());
+			candidate_txs.push(tx.clone());
+			let agg_tx = transaction::aggregate(&candidate_txs)?;
+			self.apply_tx_to_block_sums(&agg_tx, header)?;
+			if self
+				.txpool
+				.validate_raw_tx(&agg_tx, header, weighting, self.config.min_fee_rate)
+				.is_ok()
+			{
+				valid_txs.push(tx.clone());
+			}
+		}
+		Ok(valid_txs)
+	}
+
+	fn apply_tx_to_block_sums(
+		&self,
+		tx: &Transaction,
+		header: &BlockHeader,
+	) -> Result<BlockSums, PoolError> {
+		let overage = tx.overage();
+		let offset = {
+			let secp = static_secp_instance();
+			let secp = secp.lock();
+			header.total_kernel_offset().add(&tx.offset, &secp)
+		}?;
+		let block_sums = self.blockchain.get_block_sums(&header.hash())?;
+		let (utxo_sum, kernel_sum) =
+			(block_sums, tx as &dyn Committed).verify_kernel_sums(overage, offset)?;
+		Ok(BlockSums {
+			utxo_sum,
+			kernel_sum,
+		})
 	}
 
 	pub fn tx_kernel_received(
@@ -327,6 +366,13 @@ impl<A: PoolAdapter, B: BlockChain> TransactionPool<A, B> {
 		}
 		self.stempool.retrieve_tx_by_kernel_hash(kernel_hash)
 	}
+
+	pub fn prepare_mineable_transactions(&self) -> Result<Vec<Transaction>, PoolError> {
+		self.txpool.prepare_mineable_transactions(
+			self.config.mineable_max_weight,
+			self.config.min_fee_rate,
+		)
+	}
 }
 
 pub struct Pool<B>
@@ -336,6 +382,16 @@ where
 	pub entries: Vec<PoolEntry>,
 	pub blockchain: Arc<B>,
 	pub name: String,
+}
+
+impl<B: BlockChain> Clone for Pool<B> {
+	fn clone(&self) -> Self {
+		Pool {
+			entries: self.entries.clone(),
+			blockchain: Arc::clone(&self.blockchain),
+			name: self.name.clone(),
+		}
+	}
 }
 
 impl<B: BlockChain> Pool<B> {
@@ -396,11 +452,12 @@ impl<B: BlockChain> Pool<B> {
 	pub fn prepare_mineable_transactions(
 		&self,
 		max_weight: u64,
+		min_fee_rate: u64,
 	) -> Result<Vec<Transaction>, PoolError> {
 		let weighting = Weighting::AsLimitedTransaction(max_weight);
 		let txs = self.bucket_transactions(weighting);
 		let header = self.blockchain.chain_head()?;
-		let valid_txs = self.validate_raw_txs(&txs, None, &header, weighting)?;
+		let valid_txs = self.validate_raw_txs(&txs, None, &header, weighting, min_fee_rate)?;
 		Ok(valid_txs)
 	}
 
@@ -427,6 +484,7 @@ impl<B: BlockChain> Pool<B> {
 		entry: PoolEntry,
 		extra_tx: Option<Transaction>,
 		header: &BlockHeader,
+		min_fee_rate: u64,
 	) -> Result<(), PoolError> {
 		let mut txs = self.all_transactions();
 		if txs.contains(&entry.tx) {
@@ -439,7 +497,7 @@ impl<B: BlockChain> Pool<B> {
 			txs.push(entry.tx.clone());
 			transaction::aggregate(&txs)?
 		};
-		self.validate_raw_tx(&agg_tx, header, Weighting::NoLimit)?;
+		self.validate_raw_tx(&agg_tx, header, Weighting::NoLimit, min_fee_rate)?;
 		self.log_pool_add(&entry, header);
 		self.entries.push(entry);
 		Ok(())
@@ -462,16 +520,16 @@ impl<B: BlockChain> Pool<B> {
 	fn validate_raw_tx(
 		&self,
 		tx: &Transaction,
-		header: &BlockHeader,
+		_header: &BlockHeader,
 		weighting: Weighting,
-	) -> Result<BlockSums, PoolError> {
-		if tx.fee_rate() < self.config.min_fee_rate {
-			return Err(PoolError::LowFeeTransaction(self.config.min_fee_rate));
+		min_fee_rate: u64,
+	) -> Result<(), PoolError> {
+		if tx.fee_rate() < min_fee_rate {
+			return Err(PoolError::LowFeeTransaction(min_fee_rate));
 		}
 		tx.validate(weighting)?;
 		self.blockchain.validate_tx(tx)?;
-		let new_sums = self.apply_tx_to_block_sums(tx, header)?;
-		Ok(new_sums)
+		Ok(())
 	}
 
 	pub fn validate_raw_txs(
@@ -480,6 +538,7 @@ impl<B: BlockChain> Pool<B> {
 		extra_tx: Option<Transaction>,
 		header: &BlockHeader,
 		weighting: Weighting,
+		min_fee_rate: u64,
 	) -> Result<Vec<Transaction>, PoolError> {
 		let mut valid_txs = vec![];
 		for tx in txs {
@@ -490,7 +549,10 @@ impl<B: BlockChain> Pool<B> {
 			candidate_txs.extend(valid_txs.clone());
 			candidate_txs.push(tx.clone());
 			let agg_tx = transaction::aggregate(&candidate_txs)?;
-			if self.validate_raw_tx(&agg_tx, header, weighting).is_ok() {
+			if self
+				.validate_raw_tx(&agg_tx, header, weighting, min_fee_rate)
+				.is_ok()
+			{
 				valid_txs.push(tx.clone());
 			}
 		}
@@ -517,35 +579,16 @@ impl<B: BlockChain> Pool<B> {
 		Ok((spent_pool.to_vec(), spent_utxo))
 	}
 
-	fn apply_tx_to_block_sums(
-		&self,
-		tx: &Transaction,
-		header: &BlockHeader,
-	) -> Result<BlockSums, PoolError> {
-		let overage = tx.overage();
-		let offset = {
-			let secp = static_secp_instance();
-			let secp = secp.lock();
-			header.total_kernel_offset().add(&tx.offset, &secp)
-		}?;
-		let block_sums = self.blockchain.get_block_sums(&header.hash())?;
-		let (utxo_sum, kernel_sum) =
-			(block_sums, tx as &dyn Committed).verify_kernel_sums(overage, offset)?;
-		Ok(BlockSums {
-			utxo_sum,
-			kernel_sum,
-		})
-	}
-
 	pub fn reconcile(
 		&mut self,
 		extra_tx: Option<Transaction>,
 		header: &BlockHeader,
+		min_fee_rate: u64,
 	) -> Result<(), PoolError> {
 		let existing_entries = self.entries.clone();
 		self.entries.clear();
 		for x in existing_entries {
-			let _ = self.add_to_pool(x, extra_tx.clone(), header);
+			let _ = self.add_to_pool(x, extra_tx.clone(), header, min_fee_rate);
 		}
 		Ok(())
 	}

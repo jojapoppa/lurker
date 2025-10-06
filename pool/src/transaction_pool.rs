@@ -20,38 +20,34 @@
 use self::core::core::hash::{Hash, Hashed};
 use self::core::core::id::ShortId;
 use self::core::core::{
-	transaction, Block, BlockHeader, HeaderVersion, OutputIdentifier, Transaction, Weighting,
+	transaction, Block, BlockHeader, BlockSums, Committed, HeaderVersion, OutputIdentifier,
+	Transaction, Weighting,
 };
 use self::core::global;
 use crate::pool::Pool;
 use crate::types::{BlockChain, PoolAdapter, PoolConfig, PoolEntry, PoolError, TxSource};
 use chrono::prelude::*;
 use grin_core as core;
-use grin_util as util;
+use grin_core::libtx::secp_ser::static_secp_instance;
 use grin_util::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-// Implement Clone for TransactionPool
-impl<B: BlockChain + Clone, P: PoolAdapter + Clone> Clone for TransactionPool<B, P> {
+impl<A: PoolAdapter, B: BlockChain> Clone for TransactionPool<A, B> {
 	fn clone(&self) -> Self {
 		TransactionPool {
 			config: self.config.clone(),
 			txpool: self.txpool.clone(),
 			stempool: self.stempool.clone(),
 			reorg_cache: Arc::new(RwLock::new(self.reorg_cache.read().clone())),
-			blockchain: self.blockchain.clone(),
-			adapter: self.adapter.clone(),
+			blockchain: Arc::clone(&self.blockchain),
+			adapter: Arc::clone(&self.adapter),
 		}
 	}
 }
 
 /// Transaction pool implementation.
-pub struct TransactionPool<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+pub struct TransactionPool<A: PoolAdapter, B: BlockChain> {
 	/// Pool Config
 	pub config: PoolConfig,
 	/// Our transaction pool.
@@ -63,16 +59,12 @@ where
 	/// The blockchain
 	pub blockchain: Arc<B>,
 	/// The pool adapter
-	pub adapter: Arc<P>,
+	pub adapter: Arc<A>,
 }
 
-impl<B, P> TransactionPool<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+impl<A: PoolAdapter, B: BlockChain> TransactionPool<A, B> {
 	/// Create a new transaction pool
-	pub fn new(config: PoolConfig, chain: Arc<B>, adapter: Arc<P>) -> Self {
+	pub fn new(config: PoolConfig, chain: Arc<B>, adapter: Arc<A>) -> Self {
 		TransactionPool {
 			config,
 			txpool: Pool::new(chain.clone(), "txpool".to_string()),
@@ -94,7 +86,9 @@ where
 		header: &BlockHeader,
 		extra_tx: Option<Transaction>,
 	) -> Result<(), PoolError> {
-		self.stempool.add_to_pool(entry.clone(), extra_tx, header)
+		self.apply_tx_to_block_sums(&entry.tx, header)?;
+		self.stempool
+			.add_to_pool(entry.clone(), extra_tx, header, self.config.min_fee_rate)
 	}
 
 	fn add_to_reorg_cache(&mut self, entry: &PoolEntry) {
@@ -123,14 +117,37 @@ where
 	}
 
 	fn add_to_txpool(&mut self, entry: &PoolEntry, header: &BlockHeader) -> Result<(), PoolError> {
-		self.txpool.add_to_pool(entry.clone(), None, header)?;
+		self.apply_tx_to_block_sums(&entry.tx, header)?;
+		self.txpool
+			.add_to_pool(entry.clone(), None, header, self.config.min_fee_rate)?;
 
 		// We now need to reconcile the stempool based on the new state of the txpool.
 		// Some stempool txs may no longer be valid and we need to evict them.
 		let txpool_agg = self.txpool.all_transactions_aggregate(None)?;
-		self.stempool.reconcile(txpool_agg, header)?;
+		self.stempool
+			.reconcile(txpool_agg, header, self.config.min_fee_rate)?;
 
 		Ok(())
+	}
+
+	fn apply_tx_to_block_sums(
+		&self,
+		tx: &Transaction,
+		header: &BlockHeader,
+	) -> Result<BlockSums, PoolError> {
+		let overage = tx.overage();
+		let offset = {
+			let secp = static_secp_instance();
+			let secp = secp.lock();
+			header.total_kernel_offset().add(&tx.offset, &secp)
+		}?;
+		let block_sums = self.blockchain.get_block_sums(&header.hash())?;
+		let (utxo_sum, kernel_sum) =
+			(block_sums, tx as &dyn Committed).verify_kernel_sums(overage, offset)?;
+		Ok(BlockSums {
+			utxo_sum,
+			kernel_sum,
+		})
 	}
 
 	/// Verify the tx kernel variants and ensure they can all be accepted to the txpool/stempool
@@ -319,13 +336,15 @@ where
 	pub fn reconcile_block(&mut self, block: &Block) -> Result<(), PoolError> {
 		// First reconcile the txpool.
 		self.txpool.reconcile_block(block);
-		self.txpool.reconcile(None, &block.header)?;
+		self.txpool
+			.reconcile(None, &block.header, self.config.min_fee_rate)?;
 
 		// Now reconcile our stempool, accounting for the updated txpool txs.
 		self.stempool.reconcile_block(block);
 		{
 			let txpool_tx = self.txpool.all_transactions_aggregate(None)?;
-			self.stempool.reconcile(txpool_tx, &block.header)?;
+			self.stempool
+				.reconcile(txpool_tx, &block.header, self.config.min_fee_rate)?;
 		}
 
 		Ok(())
@@ -380,7 +399,9 @@ where
 	/// Returns a vector of transactions from the txpool so we can build a
 	/// block from them.
 	pub fn prepare_mineable_transactions(&self) -> Result<Vec<Transaction>, PoolError> {
-		self.txpool
-			.prepare_mineable_transactions(self.config.mineable_max_weight)
+		self.txpool.prepare_mineable_transactions(
+			self.config.mineable_max_weight,
+			self.config.min_fee_rate,
+		)
 	}
 }
