@@ -14,13 +14,13 @@
 
 use bincode;
 use chrono::prelude::{DateTime, Utc};
+use grin_chain::txhashset::BitmapChunk;
 use grin_core::consensus::Difficulty;
-use grin_core::core::pmmr::segment::Segment;
-use grin_p2p::types::{
-	BitmapChunk, NetAdapter, PeerAddr, PeerInfo, RangeProof, ReasonForBan, SegmentIdentifier,
-	TxHashSetRead, TxKernel,
-};
+use grin_core::core::pmmr::segment::{Segment, SegmentIdentifier};
+use grin_core::core::transaction::TxKernel;
+use grin_p2p::types::{NetAdapter, PeerAddr, PeerInfo, ReasonForBan, TxHashSetRead};
 use grin_p2p::{ChainAdapter, Peers};
+use grin_util::secp::pedersen::RangeProof;
 use log::{error, trace, warn};
 use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
@@ -219,8 +219,9 @@ impl PoolAdapter for PoolToNetAdapter {
 						}
 					};
 					if let Some(peers_iter) = peers {
-						let count = peers_iter.count();
-						for peer in peers_iter {
+						let peers_vec: Vec<_> = peers_iter.into_iter().collect();
+						let count = peers_vec.len();
+						for peer in peers_vec {
 							let addr = peer.info.addr.0.to_string();
 							if let Err(e) = endpoint.add_peer(format!("tcp://{}", addr), None).await
 							{
@@ -314,10 +315,15 @@ impl DandelionAdapter for PoolToNetAdapter {
 			self.select_dandelion_peer()
 		} else {
 			self.peers.as_ref().and_then(|p| {
-				p.iter()
+				let filtered_peers: Vec<_> = p
+					.iter()
 					.connected()
+					.into_iter()
 					.filter(|p| p.info.addr != input_peer.addr)
-					.choose_random()
+					.collect();
+				filtered_peers
+					.into_iter()
+					.choose(&mut thread_rng())
 					.map(|peer| peer.info.clone())
 			})
 		}
@@ -553,10 +559,15 @@ impl DandelionAdapter for ChainToPoolAndNetAdapter {
 			self.select_dandelion_peer()
 		} else {
 			self.peers.as_ref().and_then(|p| {
-				p.iter()
+				let filtered_peers: Vec<_> = p
+					.iter()
 					.connected()
+					.into_iter()
 					.filter(|p| p.info.addr != input_peer.addr)
-					.choose_random()
+					.collect();
+				filtered_peers
+					.into_iter()
+					.choose(&mut thread_rng())
 					.map(|peer| peer.info.clone())
 			})
 		}
@@ -850,7 +861,7 @@ impl ChainAdapter for NetToChainAdapter {
 			peers.get_output_segment(hash, id)
 		} else {
 			Err(chain::Error::Other(
-				"No peers available for output segment".to_string(),
+				"No peers available for output segment".to.string(),
 			))
 		}
 	}
@@ -908,7 +919,7 @@ impl ChainAdapter for NetToChainAdapter {
 			peers.receive_rangeproof_segment(block_hash, segment)
 		} else {
 			Err(chain::Error::Other(
-				"No peers available for rangeproof segment".to_string(),
+				"No peers available for rangeproof segment".to.string(),
 			))
 		}
 	}
@@ -922,7 +933,7 @@ impl ChainAdapter for NetToChainAdapter {
 			peers.receive_kernel_segment(block_hash, segment)
 		} else {
 			Err(chain::Error::Other(
-				"No peers available for kernel segment".to_string(),
+				"No peers available for kernel segment".to.string(),
 			))
 		}
 	}

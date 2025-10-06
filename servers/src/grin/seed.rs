@@ -28,7 +28,7 @@ use std::sync::{mpsc, Arc};
 use std::{cmp, thread, time};
 use tokio::net::UnixStream;
 use tokio::runtime::Runtime;
-use yggdrasilctl::{Endpoint, PeerEntry}; // Added PeerEntry
+use yggdrasilctl::{Endpoint, PeerEntry};
 
 use crate::core::consensus::Difficulty;
 use crate::core::global;
@@ -332,22 +332,25 @@ fn listen_for_addrs(
                     thread::Builder::new()
                         .name("peer_connect".to_string())
                         .spawn(move || {
-                            if let Err(e) = endpoint.add_peer(format!("tcp://{}", addr_str), None).await {
-                                warn!("Failed to add Yggdrasil peer {}: {:?}", addr_str, e);
-                                let _ = peers_c.update_state(addr, p2p::State::Defunct);
-                            } else {
-                                match p2p_c.connect(addr) {
-                                    Ok(p) => {
-                                        if p.info.capabilities.contains(p2p::Capabilities::PEER_LIST) {
-                                            let _ = p.send_peer_request(p2p::Capabilities::PEER_LIST);
+                            let rt = Runtime::new().expect("Failed to create Tokio runtime");
+                            rt.block_on(async {
+                                if let Err(e) = endpoint.add_peer(format!("tcp://{}", addr_str), None).await {
+                                    warn!("Failed to add Yggdrasil peer {}: {:?}", addr_str, e);
+                                    let _ = peers_c.update_state(addr, p2p::State::Defunct);
+                                } else {
+                                    match p2p_c.connect(addr) {
+                                        Ok(p) => {
+                                            if p.info.capabilities.contains(p2p::Capabilities::PEER_LIST) {
+                                                let _ = p.send_peer_request(p2p::Capabilities::PEER_LIST);
+                                            }
+                                            let _ = peers_c.update_state(addr, p2p::State::Healthy);
                                         }
-                                        let _ = peers_c.update_state(addr, p2p::State::Healthy);
-                                    }
-                                    Err(_) => {
-                                        let _ = peers_c.update_state(addr, p2p::State::Defunct);
+                                        Err(_) => {
+                                            let _ = peers_c.update_state(addr, p2p::State::Defunct);
+                                        }
                                     }
                                 }
-                            }
+                            });
                         })
                         .expect("failed to launch peer_connect thread");
                 }
