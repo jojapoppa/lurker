@@ -1469,6 +1469,7 @@ name = "grin_servers"
 version = "5.4.0-alpha.0"
 dependencies = [
  "async-stream",
+ "bincode",
  "chrono",
  "fs2",
  "futures 0.3.31",
@@ -1487,7 +1488,7 @@ dependencies = [
  "hyper-rustls 0.23.2",
  "lmdb-zero",
  "log",
- "rand 0.6.5",
+ "rand 0.8.5",
  "rustls 0.20.9",
  "serde",
  "serde_derive",

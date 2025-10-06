@@ -12,11 +12,12 @@ edition = "2018"
 [dependencies]
 hyper = { version = "0.14", features = ["full"] }
 hyper-rustls = "0.23"
+bincode = "1.3.3"
 fs2 = "0.4"
 futures = "0.3"
 http = "0.2"
 lmdb-zero = "0.4.4"
-rand = "0.6"
+rand = "0.8"
 serde = "1"
 log = "0.4"
 serde_derive = "1"

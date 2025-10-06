@@ -14,6 +14,7 @@ use crate::grin::dandelion_monitor;
 use crate::grin::seed;
 use crate::grin::sync;
 use crate::p2p::Capabilities;
+use crate::pool;
 use crate::util::file::get_first_line;
 use crate::util::StopState;
 use grin_util::RwLock;
