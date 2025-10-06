@@ -1,0 +1,990 @@
+// Copyright 2021 The Grin Developers
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use bincode;
+use chrono::prelude::{DateTime, Utc};
+use grin_chain::txhashset::BitmapChunk;
+use grin_core::consensus::Difficulty;
+use grin_core::core::pmmr::segment::{Segment, SegmentIdentifier};
+use grin_core::core::transaction::TxKernel;
+use grin_p2p::types::{NetAdapter, PeerAddr, PeerInfo, ReasonForBan, TxHashSetRead};
+use grin_p2p::{ChainAdapter, Peers};
+use grin_util::secp::pedersen::RangeProof;
+use log::{error, trace, warn};
+use rand::seq::IteratorRandom;
+use rand::{thread_rng, Rng};
+use std::fs::File;
+use std::path::PathBuf;
+use std::sync::{Arc, Weak};
+use std::thread;
+use std::collections::HashMap;
+use serde_json::Value;
+
+use crate::ServerTxPool; // Added import
+use crate::chain;
+use crate::chain::{Options, SyncState};
+use crate::common::hooks::NetEvents;
+use crate::common::types::ServerConfig;
+use crate::core::core::hash::{Hash, Hashed};
+use crate::core::core::{
+    Block, BlockHeader, BlockSums, CompactBlock, Inputs, OutputIdentifier, Transaction,
+};
+use crate::pool;
+use crate::pool::{
+    BlockChain, Pool, PoolAdapter, PoolEntry, PoolError, PoolToNetMessages, TxSource,
+};
+use crate::util::{OneTime, RwLock, StopState};
+
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
+use tokio::runtime::Runtime;
+use yggdrasilctl::Endpoint;
+
+// Newtype to wrap ServerTxPool with an extra Arc
+#[derive(Clone)]
+pub struct DandelionTxPool(pub Arc<ServerTxPool>);
+
+impl DandelionTxPool {
+    pub fn inner(&self) -> ServerTxPool {
+        Arc::clone(&self.0)
+    }
+}
+
+/// Implements the view of the chain required by the TransactionPool to
+/// operate. Mostly needed to break any direct lifecycle or implementation
+/// dependency between the pool and the chain.
+#[derive(Clone)]
+pub struct PoolToChainAdapter {
+    chain: OneTime<Weak<chain::Chain>>,
+}
+
+impl PoolToChainAdapter {
+    /// Create a new pool adapter
+    pub fn new() -> PoolToChainAdapter {
+        PoolToChainAdapter {
+            chain: OneTime::new(),
+        }
+    }
+
+    /// Set the pool adapter's chain. Should only be called once.
+    pub fn set_chain(&self, chain_ref: Arc<chain::Chain>) {
+        self.chain.init(Arc::downgrade(&chain_ref));
+    }
+
+    fn chain(&self) -> Arc<chain::Chain> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade the weak ref to our chain.")
+    }
+}
+
+impl BlockChain for PoolToChainAdapter {
+    fn chain_head(&self) -> Result<BlockHeader, PoolError> {
+        self.chain()
+            .head_header()
+            .map_err(|_| PoolError::Other("failed to get head_header".to_string()))
+    }
+
+    fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, PoolError> {
+        self.chain()
+            .get_block_header(hash)
+            .map_err(|_| PoolError::Other("failed to get block_header".to_string()))
+    }
+
+    fn get_block_sums(&self, hash: &Hash) -> Result<BlockSums, PoolError> {
+        self.chain()
+            .get_block_sums(hash)
+            .map_err(|_| PoolError::Other("failed to get block_sums".to_string()))
+    }
+
+    fn validate_tx(&self, tx: &Transaction) -> Result<(), PoolError> {
+        self.chain()
+            .validate_tx(tx)
+            .map_err(|_| PoolError::Other("failed to validate tx".to_string()))
+    }
+
+    fn validate_inputs(&self, inputs: &Inputs) -> Result<Vec<OutputIdentifier>, PoolError> {
+        self.chain()
+            .validate_inputs(inputs)
+            .map(|outputs| outputs.into_iter().map(|(out, _)| out).collect::<Vec<_>>())
+            .map_err(|_| PoolError::Other("failed to validate inputs".to_string()))
+    }
+
+    fn verify_coinbase_maturity(&self, inputs: &Inputs) -> Result<(), PoolError> {
+        self.chain()
+            .verify_coinbase_maturity(inputs)
+            .map_err(|_| PoolError::ImmatureCoinbase)
+    }
+
+    fn verify_tx_lock_height(&self, tx: &Transaction) -> Result<(), PoolError> {
+        self.chain()
+            .verify_tx_lock_height(tx)
+            .map_err(|_| PoolError::ImmatureTransaction)
+    }
+}
+
+/// To break the self-reference, we use PoolToNetAdapterAlt in the generic for TransactionPool.
+#[derive(Clone)]
+pub struct PoolToNetAdapter {
+    tx_pool: OneTime<Weak<DandelionTxPool>>,
+    peers: Option<Arc<Peers>>,
+}
+
+/// Type alias to break the cycle
+type PoolToNetAdapterAlt = PoolToNetAdapter;
+
+impl PoolToNetAdapter {
+    /// Create a new network adapter
+    pub fn new() -> PoolToNetAdapter {
+        PoolToNetAdapter {
+            tx_pool: OneTime::new(),
+            peers: None,
+        }
+    }
+
+    /// Set the pool adapter's tx_pool. Should only be called once.
+    pub fn set_tx_pool(&self, tx_pool_ref: DandelionTxPool) {
+        let weak_ref: Weak<DandelionTxPool> = Arc::downgrade(&Arc::new(tx_pool_ref));
+        self.tx_pool.init(weak_ref);
+    }
+
+    /// Initialize with peers
+    pub fn init(&self, peers: Arc<Peers>) {
+        self.peers = Some(peers);
+    }
+
+    /// Placeholder dummy adapter
+    pub fn dummy() -> PoolToNetAdapter {
+        PoolToNetAdapter {
+            tx_pool: OneTime::new(),
+            peers: None,
+        }
+    }
+
+    fn tx_pool(&self) -> ServerTxPool {
+        self.tx_pool
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade the weak ref to our tx_pool.")
+            .inner()
+    }
+}
+
+impl PoolToNetMessages for PoolToNetAdapter {
+    fn tx_received(&self, peer: &PeerInfo, tx: Transaction, header: &BlockHeader) {
+        let tx_pool = self.tx_pool();
+        let peer = peer.clone();
+        let header = header.clone();
+        thread::spawn(move || {
+            // Acquire the transaction pool lock
+            let mut lock = tx_pool.write();
+            let entry = PoolEntry {
+                src: TxSource::Peer(peer.addr.0),
+                tx,
+                tx_at: Utc::now(),
+            };
+            let res = lock.add_to_pool(entry.src, entry.tx, false, &header);
+            if let Err(e) = res {
+                warn!("Tx rejected from {:?}", peer);
+            }
+        });
+    }
+}
+
+impl PoolAdapter for PoolToNetAdapter {
+    fn tx_accepted(&self, entry: &PoolEntry) {
+        let tx = entry.tx.clone();
+        let peers = self.peers.as_ref().map(|p| p.iter().connected());
+        let rt = Runtime::new().expect("Failed to create Tokio runtime");
+        rt.block_on(async {
+            let socket_path = "/run/yggdrasil.sock";
+            match UnixStream::connect(socket_path).await {
+                Ok(socket) => {
+                    let mut endpoint = Endpoint::attach(socket).await;
+                    let tx_bytes = match bincode::serialize(&tx) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            warn!("Failed to serialize tx {}: {:?}", tx.hash(), e);
+                            return;
+                        }
+                    };
+                    if let Some(peers_iter) = peers {
+                        let peers_vec: Vec<_> = peers_iter.into_iter().collect();
+                        let count = peers_vec.len();
+                        for peer in peers_vec {
+                            let addr = peer.info.addr.0.to_string();
+                            let mut args = HashMap::new();
+                            args.insert("uri".to_string(), Value::String(format!("tcp://{}", addr)));
+                            match endpoint.request_args::<()>("addPeer", args).await {
+                                Ok(_) => {
+                                    trace!("Added Yggdrasil peer: {}", addr);
+                                }
+                                Err(e) => {
+                                    warn!("Failed to add Yggdrasil peer {}: {:?}", addr, e);
+                                    continue;
+                                }
+                            }
+                            let socket = match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
+                                Ok(socket) => socket,
+                                Err(e) => {
+                                    warn!("Failed to bind UDP socket for peer {}: {:?}", addr, e);
+                                    continue;
+                                }
+                            };
+                            if let Err(e) = socket.connect(peer.info.addr.0).await {
+                                warn!("Failed to connect to Yggdrasil peer {}: {:?}", addr, e);
+                                continue;
+                            }
+                            if let Err(e) = socket.send(&tx_bytes).await {
+                                warn!("Failed to send tx {} to peer {}: {:?}", tx.hash(), addr, e);
+                                continue;
+                            }
+                        }
+                        warn!("Broadcasting tx {} to {} Yggdrasil peers", tx.hash(), count);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+                }
+            }
+        });
+    }
+
+    fn stem_tx_accepted(&self, entry: &PoolEntry) -> Result<(), PoolError> {
+        let tx = entry.tx.clone();
+        let peers = self.peers.as_ref().map(|p| p.iter().connected());
+        let rt = Runtime::new().map_err(|e| PoolError::Other(e.to_string()))?;
+        rt.block_on(async {
+            let socket_path = "/run/yggdrasil.sock";
+            match UnixStream::connect(socket_path).await {
+                Ok(socket) => {
+                    let mut endpoint = Endpoint::attach(socket).await;
+                    let dandelion_peer = peers
+                        .and_then(|p| p.choose_random())
+                        .ok_or_else(|| PoolError::Other("No peers available".to_string()))?;
+                    let socket_addr = dandelion_peer.info.addr.0;
+                    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0")
+                        .await
+                        .map_err(|e| PoolError::Other(e.to_string()))?;
+                    socket
+                        .connect(socket_addr)
+                        .await
+                        .map_err(|e| PoolError::Other(e.to_string()))?;
+                    let tx_bytes =
+                        bincode::serialize(&tx).map_err(|e| PoolError::Other(e.to_string()))?;
+                    let mut args = HashMap::new();
+                    args.insert("uri".to_string(), Value::String(format!("tcp://{}", socket_addr)));
+                    match endpoint.request_args::<()>("addPeer", args).await {
+                        Ok(_) => {
+                            trace!("Added Yggdrasil peer: {}", socket_addr);
+                        }
+                        Err(e) => {
+                            warn!("Failed to add Yggdrasil peer {}: {:?}", socket_addr, e);
+                            return Err(PoolError::Other(format!("Failed to add peer: {:?}", e)));
+                        }
+                    }
+                    socket
+                        .send(&tx_bytes)
+                        .await
+                        .map_err(|e| PoolError::Other(e.to_string()))?;
+                    warn!(
+                        "Relayed stem tx {} to Yggdrasil peer {}",
+                        tx.hash(),
+                        socket_addr
+                    );
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Failed to connect to Yggdrasil socket: {:?}", e);
+                    Err(PoolError::Other(e.to_string()))
+                }
+            }
+        })
+    }
+}
+
+impl DandelionAdapter for PoolToNetAdapter {
+    fn select_dandelion_peer(&self) -> Option<PeerInfo> {
+        self.peers.as_ref().and_then(|p| {
+            p.iter()
+                .connected()
+                .choose_random()
+                .map(|peer| peer.info.clone())
+        })
+    }
+
+    fn select_dandelionpp_peer(&self) -> Option<PeerInfo> {
+        self.select_dandelion_peer()
+    }
+
+    fn select_output_peer(&self, input_peer: &PeerInfo, is_stem: bool) -> Option<PeerInfo> {
+        if is_stem {
+            self.select_dandelion_peer()
+        } else {
+            self.peers.as_ref().and_then(|p| {
+                let filtered_peers: Vec<_> = p
+                    .iter()
+                    .connected()
+                    .into_iter()
+                    .filter(|p| p.info.addr != input_peer.addr)
+                    .collect();
+                filtered_peers
+                    .into_iter()
+                    .choose(&mut thread_rng())
+                    .map(|peer| peer.info.clone())
+            })
+        }
+    }
+
+    fn is_stem(&self) -> bool {
+        let mut rng = thread_rng();
+        rng.gen_bool(0.9) // 90% chance of stem phase
+    }
+
+    fn is_expired(&self) -> bool {
+        // TODO: Implement proper epoch expiration logic if needed
+        false
+    }
+
+    fn next_epoch(&self) {
+        // No-op for now
+    }
+}
+
+#[derive(Clone)]
+pub struct ChainToPoolAndNetAdapter {
+    chain: OneTime<Weak<chain::Chain>>,
+    pool: OneTime<Weak<DandelionTxPool>>,
+    peers: Option<Arc<Peers>>,
+}
+
+impl ChainToPoolAndNetAdapter {
+    /// Create a new combined adapter
+    pub fn new(chain: Arc<chain::Chain>, tx_pool: DandelionTxPool) -> ChainToPoolAndNetAdapter {
+        let chain_to_pool_and_net = ChainToPoolAndNetAdapter {
+            chain: OneTime::new(),
+            pool: OneTime::new(),
+            peers: None,
+        };
+        chain_to_pool_and_net.chain.init(Arc::downgrade(&chain));
+        let downgraded: Weak<DandelionTxPool> = Arc::downgrade(&Arc::new(tx_pool));
+        chain_to_pool_and_net.pool.init(downgraded);
+        chain_to_pool_and_net
+    }
+
+    pub fn init(&self, peers: Arc<Peers>) {
+        self.peers = Some(peers);
+    }
+}
+
+impl BlockChain for ChainToPoolAndNetAdapter {
+    fn chain_head(&self) -> Result<BlockHeader, PoolError> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .head_header()
+            .map_err(|_| PoolError::Other("failed to get head_header".to_string()))
+    }
+
+    fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, PoolError> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .get_block_header(hash)
+            .map_err(|_| PoolError::Other("failed to get block_header".to_string()))
+    }
+
+    fn get_block_sums(&self, hash: &Hash) -> Result<BlockSums, PoolError> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .get_block_sums(hash)
+            .map_err(|_| PoolError::Other("failed to get block_sums".to_string()))
+    }
+
+    fn validate_tx(&self, tx: &Transaction) -> Result<(), PoolError> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .validate_tx(tx)
+            .map_err(|_| PoolError::Other("failed to validate tx".to_string()))
+    }
+
+    fn validate_inputs(&self, inputs: &Inputs) -> Result<Vec<OutputIdentifier>, PoolError> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .validate_inputs(inputs)
+            .map(|outputs| outputs.into_iter().map(|(out, _)| out).collect::<Vec<_>>())
+            .map_err(|_| PoolError::Other("failed to validate inputs".to_string()))
+    }
+
+    fn verify_coinbase_maturity(&self, inputs: &Inputs) -> Result<(), PoolError> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .verify_coinbase_maturity(inputs)
+            .map_err(|_| PoolError::ImmatureCoinbase)
+    }
+
+    fn verify_tx_lock_height(&self, tx: &Transaction) -> Result<(), PoolError> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .verify_tx_lock_height(tx)
+            .map_err(|_| PoolError::ImmatureTransaction)
+    }
+}
+
+impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
+    fn chain_head(&self) -> Result<BlockHeader, grin_p2p::Error> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .head_header()
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_block(&self, hash: &Hash) -> Result<Block, grin_p2p::Error> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .get_block(hash)
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, grin_p2p::Error> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .get_block_header(hash)
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_header_by_height(&self, height: u64) -> Result<BlockHeader, grin_p2p::Error> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .get_header_by_height(height)
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_block_id_by_height(&self, height: u64) -> Result<Hash, grin_p2p::Error> {
+        self.chain
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade chain ref")
+            .get_header_by_height(height)
+            .map(|h| h.hash())
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+}
+
+impl PoolToNetMessages for ChainToPoolAndNetAdapter {
+    fn tx_received(&self, peer: &PeerInfo, tx: Transaction, header: &BlockHeader) {
+        let tx_pool = self
+            .pool
+            .borrow()
+            .upgrade()
+            .expect("Failed to upgrade pool ref")
+            .inner();
+        let peer = peer.clone();
+        let header = header.clone();
+        thread::spawn(move || {
+            // Acquire the transaction pool lock
+            let mut lock = tx_pool.write();
+            let entry = PoolEntry {
+                src: TxSource::Peer(peer.addr.0),
+                tx,
+                tx_at: Utc::now(),
+            };
+            let res = lock.add_to_pool(entry.src, entry.tx, false, &header);
+            if let Err(e) = res {
+                warn!("Tx rejected from {:?}", peer);
+            }
+        });
+    }
+}
+
+impl DandelionAdapter for ChainToPoolAndNetAdapter {
+    fn select_dandelion_peer(&self) -> Option<PeerInfo> {
+        self.peers.as_ref().and_then(|p| {
+            p.iter()
+                .connected()
+                .choose_random()
+                .map(|peer| peer.info.clone())
+        })
+    }
+
+    fn select_dandelionpp_peer(&self) -> Option<PeerInfo> {
+        self.select_dandelion_peer()
+    }
+
+    fn select_output_peer(&self, input_peer: &PeerInfo, is_stem: bool) -> Option<PeerInfo> {
+        if is_stem {
+            self.select_dandelion_peer()
+        } else {
+            self.peers.as_ref().and_then(|p| {
+                let filtered_peers: Vec<_> = p
+                    .iter()
+                    .connected()
+                    .into_iter()
+                    .filter(|p| p.info.addr != input_peer.addr)
+                    .collect();
+                filtered_peers
+                    .into_iter()
+                    .choose(&mut thread_rng())
+                    .map(|peer| peer.info.clone())
+            })
+        }
+    }
+
+    fn is_stem(&self) -> bool {
+        let mut rng = thread_rng();
+        rng.gen_bool(0.9) // 90% chance of stem phase
+    }
+
+    fn is_expired(&self) -> bool {
+        // TODO: Implement proper epoch expiration logic if needed
+        false
+    }
+
+    fn next_epoch(&self) {
+        // No-op for now
+    }
+}
+
+pub struct NetToChainAdapter {
+    chain: Arc<chain::Chain>,
+    sync_state: Arc<SyncState>,
+    tx_pool: ServerTxPool,
+    config: ServerConfig,
+    net_hooks: Vec<Box<dyn NetEvents + Send + Sync>>,
+    peers: Option<Arc<Peers>>,
+}
+
+impl NetToChainAdapter {
+    /// Create a new network adapter
+    pub fn new(
+        sync_state: Arc<SyncState>,
+        chain: Arc<chain::Chain>,
+        tx_pool: ServerTxPool,
+        config: ServerConfig,
+        net_hooks: Vec<Box<dyn NetEvents + Send + Sync>>,
+    ) -> NetToChainAdapter {
+        NetToChainAdapter {
+            chain,
+            sync_state,
+            tx_pool,
+            config,
+            net_hooks,
+            peers: None,
+        }
+    }
+
+    pub fn init(&mut self, peers: Arc<Peers>) {
+        self.peers = Some(peers);
+    }
+}
+
+impl grin_p2p::BlockChain for NetToChainAdapter {
+    fn chain_head(&self) -> Result<BlockHeader, grin_p2p::Error> {
+        self.chain
+            .head_header()
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_block(&self, hash: &Hash) -> Result<Block, grin_p2p::Error> {
+        self.chain
+            .get_block(hash)
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, grin_p2p::Error> {
+        self.chain
+            .get_block_header(hash)
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_header_by_height(&self, height: u64) -> Result<BlockHeader, grin_p2p::Error> {
+        self.chain
+            .get_header_by_height(height)
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+
+    fn get_block_id_by_height(&self, height: u64) -> Result<Hash, grin_p2p::Error> {
+        self.chain
+            .get_header_by_height(height)
+            .map(|h| h.hash())
+            .map_err(|e| grin_p2p::Error::Chain(e))
+    }
+}
+
+impl PoolToNetMessages for NetToChainAdapter {
+    fn tx_received(&self, peer: &PeerInfo, tx: Transaction, header: &BlockHeader) {
+        let tx_pool = self.tx_pool.clone();
+        let peer = peer.clone();
+        let header = header.clone();
+        thread::spawn(move || {
+            let mut lock = tx_pool.write();
+            let entry = PoolEntry {
+                src: TxSource::Peer(peer.addr.0),
+                tx,
+                tx_at: Utc::now(),
+            };
+            let res = lock.add_to_pool(entry.src, entry.tx, false, &header);
+            if let Err(e) = res {
+                warn!("Tx rejected from {:?}", peer);
+            }
+        });
+    }
+}
+
+impl ChainAdapter for NetToChainAdapter {
+    fn total_difficulty(&self) -> Result<Difficulty, chain::Error> {
+        self.chain.total_difficulty()
+    }
+
+    fn total_height(&self) -> Result<u64, chain::Error> {
+        self.chain.total_height()
+    }
+
+    fn transaction_received(&self, tx: Transaction, stem: bool) -> Result<bool, chain::Error> {
+        let mut lock = self.tx_pool.write();
+        let header = self.chain.head_header()?;
+        let entry = PoolEntry {
+            src: TxSource::Broadcast,
+            tx,
+            tx_at: Utc::now(),
+        };
+        lock.add_to_pool(entry.src, entry.tx, stem, &header)
+            .map_err(|e| chain::Error::Other(format!("failed to add transaction to pool: {}", e)))
+            .map(|_| true)
+    }
+
+    fn get_transaction(&self, kernel_hash: Hash) -> Option<Transaction> {
+        self.tx_pool.read().get_transaction(&kernel_hash)
+    }
+
+    fn tx_kernel_received(
+        &self,
+        kernel_hash: Hash,
+        peer_info: &PeerInfo,
+    ) -> Result<bool, chain::Error> {
+        Ok(self
+            .tx_pool
+            .read()
+            .tx_kernel_received(&kernel_hash, peer_info)
+            .is_some())
+    }
+
+    fn block_received(
+        &self,
+        b: Block,
+        peer_info: &PeerInfo,
+        opts: Options,
+    ) -> Result<bool, chain::Error> {
+        self.chain
+            .process_block(b, opts)
+            .map(|opt_tip| opt_tip.is_some())
+            .map_err(|e| chain::Error::Other(format!("block processing failed: {}", e)))
+    }
+
+    fn compact_block_received(
+        &self,
+        cb: CompactBlock,
+        peer_info: &PeerInfo,
+    ) -> Result<bool, chain::Error> {
+        self.chain
+            .process_compact_block(cb, peer_info)
+            .map_err(|e| chain::Error::Other(format!("compact block processing failed: {}", e)))
+    }
+
+    fn header_received(&self, bh: BlockHeader, peer_info: &PeerInfo) -> Result<bool, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.header_received(bh, peer_info)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for header_received".to_string(),
+            ))
+        }
+    }
+
+    fn headers_received(
+        &self,
+        headers: &[BlockHeader],
+        peer_info: &PeerInfo,
+    ) -> Result<bool, chain::Error> {
+        self.chain
+            .process_block_headers(headers, peer_info)
+            .map_err(|e| chain::Error::Other(format!("headers processing failed: {}", e)))
+    }
+
+    fn locate_headers(&self, locator: &[Hash]) -> Result<Vec<BlockHeader>, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.locate_headers(locator)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for locate_headers".to_string(),
+            ))
+        }
+    }
+
+    fn get_block(&self, h: Hash, _peer_info: &PeerInfo) -> Option<Block> {
+        self.chain.get_block(&h).ok()
+    }
+
+    fn txhashset_read(&self, h: Hash) -> Option<TxHashSetRead> {
+        self.chain.txhashset_read(h).ok()
+    }
+
+    fn txhashset_archive_header(&self) -> Result<BlockHeader, chain::Error> {
+        self.chain.txhashset_archive_header()
+    }
+
+    fn txhashset_receive_ready(&self) -> bool {
+        self.chain.txhashset_receive_ready()
+    }
+
+    fn txhashset_download_update(
+        &self,
+        start_time: DateTime<Utc>,
+        downloaded_size: u64,
+        total_size: u64,
+    ) -> bool {
+        self.chain
+            .txhashset_download_update(start_time, downloaded_size, total_size)
+    }
+
+    fn txhashset_write(
+        &self,
+        h: Hash,
+        txhashset_data: File,
+        peer_info: &PeerInfo,
+    ) -> Result<bool, chain::Error> {
+        self.chain.txhashset_write(h, txhashset_data, peer_info)
+    }
+
+    fn get_tmp_dir(&self) -> PathBuf {
+        self.chain.get_tmp_dir()
+    }
+
+    fn get_tmpfile_pathname(&self, tmpfile_name: String) -> PathBuf {
+        self.chain.get_tmpfile_pathname(tmpfile_name)
+    }
+
+    fn get_kernel_segment(
+        &self,
+        hash: Hash,
+        id: SegmentIdentifier,
+    ) -> Result<Segment<TxKernel>, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.get_kernel_segment(hash, id)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for kernel segment".to_string(),
+            ))
+        }
+    }
+
+    fn get_bitmap_segment(
+        &self,
+        hash: Hash,
+        id: SegmentIdentifier,
+    ) -> Result<(Segment<BitmapChunk>, Hash), chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.get_bitmap_segment(hash, id)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for bitmap segment".to_string(),
+            ))
+        }
+    }
+
+    fn get_output_segment(
+        &self,
+        hash: Hash,
+        id: SegmentIdentifier,
+    ) -> Result<(Segment<OutputIdentifier>, Hash), chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.get_output_segment(hash, id)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for output segment".to_string(),
+            ))
+        }
+    }
+
+    fn get_rangeproof_segment(
+        &self,
+        hash: Hash,
+        id: SegmentIdentifier,
+    ) -> Result<Segment<RangeProof>, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.get_rangeproof_segment(hash, id)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for rangeproof segment".to_string(),
+            ))
+        }
+    }
+
+    fn receive_bitmap_segment(
+        &self,
+        block_hash: Hash,
+        output_root: Hash,
+        segment: Segment<BitmapChunk>,
+    ) -> Result<bool, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.receive_bitmap_segment(block_hash, output_root, segment)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for bitmap segment".to_string(),
+            ))
+        }
+    }
+
+    fn receive_output_segment(
+        &self,
+        block_hash: Hash,
+        bitmap_root: Hash,
+        segment: Segment<OutputIdentifier>,
+    ) -> Result<bool, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.receive_output_segment(block_hash, bitmap_root, segment)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for output segment".to_string(),
+            ))
+        }
+    }
+
+    fn receive_rangeproof_segment(
+        &self,
+        block_hash: Hash,
+        segment: Segment<RangeProof>,
+    ) -> Result<bool, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.receive_rangeproof_segment(block_hash, segment)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for rangeproof segment".to_string(),
+            ))
+        }
+    }
+
+    fn receive_kernel_segment(
+        &self,
+        block_hash: Hash,
+        segment: Segment<TxKernel>,
+    ) -> Result<bool, chain::Error> {
+        if let Some(peers) = &self.peers {
+            peers.receive_kernel_segment(block_hash, segment)
+        } else {
+            Err(chain::Error::Other(
+                "No peers available for kernel segment".to_string(),
+            ))
+        }
+    }
+}
+
+impl NetAdapter for NetToChainAdapter {
+    fn find_peer_addrs(&self, capab: grin_p2p::Capabilities) -> Vec<PeerAddr> {
+        if let Some(peers) = &self.peers {
+            peers.find_peer_addrs(capab)
+        } else {
+            vec![]
+        }
+    }
+
+    fn peer_addrs_received(&self, addrs: Vec<PeerAddr>) {
+        if let Some(peers) = &self.peers {
+            peers.peer_addrs_received(addrs);
+        }
+    }
+
+    fn peer_difficulty(&self, addr: PeerAddr, diff: Difficulty, height: u64) {
+        if let Some(peers) = &self.peers {
+            peers.peer_difficulty(addr, diff, height);
+        }
+    }
+
+    fn is_banned(&self, addr: PeerAddr) -> bool {
+        if let Some(peers) = &self.peers {
+            peers.is_banned(addr)
+        } else {
+            false
+        }
+    }
+}
+
+/// Dandelion relay adapter trait.
+pub trait DandelionAdapter: Send + Sync {
+    /// Selects a peer randomly from the peers that support dandelion.
+    fn select_dandelion_peer(&self) -> Option<PeerInfo>;
+
+    /// Selects a peer randomly from the peers that support dandelion++.
+    fn select_dandelionpp_peer(&self) -> Option<PeerInfo>;
+
+    /// Selects a peer to send the transaction to the next hop.
+    fn select_output_peer(&self, input_peer: &PeerInfo, is_stem: bool) -> Option<PeerInfo>;
+
+    /// Whether we are currently in stem phase.
+    fn is_stem(&self) -> bool;
+
+    /// Whether the current epoch has expired.
+    fn is_expired(&self) -> bool;
+
+    /// Advance to the next epoch.
+    fn next_epoch(&self);
+}
+
+/// Blanket impl to allow using Arc<dyn DandelionAdapter>.
+impl<T: DandelionAdapter> DandelionAdapter for Arc<T> {
+    fn select_dandelion_peer(&self) -> Option<PeerInfo> {
+        (**self).select_dandelion_peer()
+    }
+
+    fn select_dandelionpp_peer(&self) -> Option<PeerInfo> {
+        (**self).select_dandelionpp_peer()
+    }
+
+    fn select_output_peer(&self, input_peer: &PeerInfo, is_stem: bool) -> Option<PeerInfo> {
+        (**self).select_output_peer(input_peer, is_stem)
+    }
+
+    fn is_stem(&self) -> bool {
+        (**self).is_stem()
+    }
+
+    fn is_expired(&self) -> bool {
+        (**self).is_expired()
+    }
+
+    fn next_epoch(&self) {
+        (**self).next_epoch()
+    }
+}

@@ -24,6 +24,8 @@ use grin_util::secp::pedersen::RangeProof;
 use log::{error, trace, warn};
 use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
@@ -223,10 +225,19 @@ impl PoolAdapter for PoolToNetAdapter {
 						let count = peers_vec.len();
 						for peer in peers_vec {
 							let addr = peer.info.addr.0.to_string();
-							if let Err(e) = endpoint.add_peer(format!("tcp://{}", addr), None).await
-							{
-								warn!("Failed to add Yggdrasil peer {}: {:?}", addr, e);
-								continue;
+							let mut args = HashMap::new();
+							args.insert(
+								"uri".to_string(),
+								Value::String(format!("tcp://{}", addr)),
+							);
+							match endpoint.request_args::<()>("addPeer", args).await {
+								Ok(_) => {
+									trace!("Added Yggdrasil peer: {}", addr);
+								}
+								Err(e) => {
+									warn!("Failed to add Yggdrasil peer {}: {:?}", addr, e);
+									continue;
+								}
 							}
 							let socket = match tokio::net::UdpSocket::bind("0.0.0.0:0").await {
 								Ok(socket) => socket,
@@ -276,6 +287,20 @@ impl PoolAdapter for PoolToNetAdapter {
 						.map_err(|e| PoolError::Other(e.to_string()))?;
 					let tx_bytes =
 						bincode::serialize(&tx).map_err(|e| PoolError::Other(e.to_string()))?;
+					let mut args = HashMap::new();
+					args.insert(
+						"uri".to_string(),
+						Value::String(format!("tcp://{}", socket_addr)),
+					);
+					match endpoint.request_args::<()>("addPeer", args).await {
+						Ok(_) => {
+							trace!("Added Yggdrasil peer: {}", socket_addr);
+						}
+						Err(e) => {
+							warn!("Failed to add Yggdrasil peer {}: {:?}", socket_addr, e);
+							return Err(PoolError::Other(format!("Failed to add peer: {:?}", e)));
+						}
+					}
 					socket
 						.send(&tx_bytes)
 						.await
@@ -443,7 +468,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.head_header()
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_block(&self, hash: &Hash) -> Result<Block, grin_p2p::Error> {
@@ -452,7 +477,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.get_block(hash)
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, grin_p2p::Error> {
@@ -461,7 +486,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.get_block_header(hash)
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_header_by_height(&self, height: u64) -> Result<BlockHeader, grin_p2p::Error> {
@@ -470,7 +495,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.upgrade()
 			.expect("Failed to upgrade chain ref")
 			.get_header_by_height(height)
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_block_id_by_height(&self, height: u64) -> Result<Hash, grin_p2p::Error> {
@@ -480,7 +505,7 @@ impl grin_p2p::BlockChain for ChainToPoolAndNetAdapter {
 			.expect("Failed to upgrade chain ref")
 			.get_header_by_height(height)
 			.map(|h| h.hash())
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 }
 
@@ -558,7 +583,6 @@ impl DandelionAdapter for ChainToPoolAndNetAdapter {
 	}
 }
 
-#[derive(Clone)]
 pub struct NetToChainAdapter {
 	chain: Arc<chain::Chain>,
 	sync_state: Arc<SyncState>,
@@ -596,32 +620,32 @@ impl grin_p2p::BlockChain for NetToChainAdapter {
 	fn chain_head(&self) -> Result<BlockHeader, grin_p2p::Error> {
 		self.chain
 			.head_header()
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_block(&self, hash: &Hash) -> Result<Block, grin_p2p::Error> {
 		self.chain
 			.get_block(hash)
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_block_header(&self, hash: &Hash) -> Result<BlockHeader, grin_p2p::Error> {
 		self.chain
 			.get_block_header(hash)
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_header_by_height(&self, height: u64) -> Result<BlockHeader, grin_p2p::Error> {
 		self.chain
 			.get_header_by_height(height)
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 
 	fn get_block_id_by_height(&self, height: u64) -> Result<Hash, grin_p2p::Error> {
 		self.chain
 			.get_header_by_height(height)
 			.map(|h| h.hash())
-			.map_err(|e| grin_p2p::Error::ChainError(e))
+			.map_err(|e| grin_p2p::Error::Chain(e))
 	}
 }
 
@@ -647,11 +671,11 @@ impl PoolToNetMessages for NetToChainAdapter {
 
 impl ChainAdapter for NetToChainAdapter {
 	fn total_difficulty(&self) -> Result<Difficulty, chain::Error> {
-		self.chain.total_difficulty()
+		self.chain.head().map(|tip| tip.total_difficulty)
 	}
 
 	fn total_height(&self) -> Result<u64, chain::Error> {
-		self.chain.total_height()
+		self.chain.head().map(|tip| tip.height)
 	}
 
 	fn transaction_received(&self, tx: Transaction, stem: bool) -> Result<bool, chain::Error> {
@@ -887,7 +911,7 @@ impl ChainAdapter for NetToChainAdapter {
 			peers.receive_kernel_segment(block_hash, segment)
 		} else {
 			Err(chain::Error::Other(
-				"No peers available for kernel segment".to.string(),
+				"No peers available for kernel segment".to_string(),
 			))
 		}
 	}
