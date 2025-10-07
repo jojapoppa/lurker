@@ -22,7 +22,7 @@ use crate::handlers::chain_api::{ChainHandler, KernelHandler, OutputHandler};
 use crate::handlers::pool_api::PoolHandler;
 use crate::handlers::transactions_api::TxHashSetHandler;
 use crate::handlers::version_api::VersionHandler;
-use crate::pool::{self, BlockChain, PoolAdapter, PoolEntry};
+use crate::pool::{PoolEntry, ServerTxPool};
 use crate::types::{
 	BlockHeaderPrintable, BlockPrintable, LocatedTxKernel, OutputListing, OutputPrintable, Tip,
 	Version,
@@ -36,36 +36,26 @@ use std::sync::Weak;
 /// called the ['Owner'](struct.Owner.html) and ['Foreign'](struct.Foreign.html) APIs
 ///
 /// Methods in this API are intended to be 'single use'.
-///
-pub struct Foreign<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+pub struct Foreign {
 	pub chain: Weak<Chain>,
-	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+	pub tx_pool: Weak<RwLock<ServerTxPool>>,
 	pub sync_state: Weak<SyncState>,
 }
 
-impl<B, P> Foreign<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
-	/// Create a new API instance with the chain, transaction pool, peers and `sync_state`. All subsequent
-	/// API calls will operate on this instance of node API.
+impl Foreign {
+	/// Create a new API instance with the chain, transaction pool, and sync_state.
+	/// All subsequent API calls will operate on this instance of node API.
 	///
 	/// # Arguments
 	/// * `chain` - A non-owning reference of the chain.
 	/// * `tx_pool` - A non-owning reference of the transaction pool.
-	/// * `sync_state` - A non-owning reference of the `sync_state`.
+	/// * `sync_state` - A non-owning reference of the sync_state.
 	///
 	/// # Returns
-	/// * An instance of the Node holding references to the current chain, transaction pool, peers and sync_state.
-	///
+	/// * An instance of the Foreign API holding references to the current chain, transaction pool, and sync_state.
 	pub fn new(
 		chain: Weak<Chain>,
-		tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+		tx_pool: Weak<RwLock<ServerTxPool>>,
 		sync_state: Weak<SyncState>,
 	) -> Self {
 		Foreign {
@@ -75,19 +65,18 @@ where
 		}
 	}
 
-	/// Gets block header given either a height, a hash or an unspent output commitment. Only one parameters is needed.
-	/// If multiple parameters are provided only the first one in the list is used.
+	/// Gets block header given either a height, a hash, or an unspent output commitment.
+	/// Only one parameter is needed. If multiple parameters are provided, only the first one is used.
 	///
 	/// # Arguments
-	/// * `height` - block height.
-	/// * `hash` - block hash.
-	/// * `commit` - output commitment.
+	/// * `height` - Block height.
+	/// * `hash` - Block hash.
+	/// * `commit` - Output commitment.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * A [`BlockHeaderPrintable`](types/struct.BlockHeaderPrintable.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A [`BlockHeaderPrintable`](../types/struct.BlockHeaderPrintable.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_header(
 		&self,
 		height: Option<u64>,
@@ -101,19 +90,18 @@ where
 		header_handler.get_header_v2(&hash)
 	}
 
-	/// Gets block details given either a height, a hash or an unspent output commitment. Only one parameters is needed.
-	/// If multiple parameters are provided only the first one in the list is used.
+	/// Gets block details given either a height, a hash, or an unspent output commitment.
+	/// Only one parameter is needed. If multiple parameters are provided, only the first one is used.
 	///
 	/// # Arguments
-	/// * `height` - block height.
-	/// * `hash` - block hash.
-	/// * `commit` - output commitment.
+	/// * `height` - Block height.
+	/// * `hash` - Block hash.
+	/// * `commit` - Output commitment.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * A [`BlockPrintable`](types/struct.BlockPrintable.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A [`BlockPrintable`](../types/struct.BlockPrintable.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_block(
 		&self,
 		height: Option<u64>,
@@ -135,22 +123,21 @@ where
 		block_handler.get_block(&hash, include_proof, include_merkle_proof)
 	}
 
-	/// Returns a [`BlockListing`](types/struct.BlockListing.html) of available blocks
-	/// between `min_height` and `max_height`
+	/// Returns a [`BlockListing`](../types/struct.BlockListing.html) of available blocks
+	/// between `min_height` and `max_height`.
 	/// The method will query the database for blocks starting at the block height `min_height`
 	/// and continue until `max_height`, skipping any blocks that aren't available.
 	///
 	/// # Arguments
-	/// * `start_height` - starting height to lookup.
-	/// * `end_height` - ending height to to lookup.
+	/// * `start_height` - Starting height to lookup.
+	/// * `end_height` - Ending height to lookup.
 	/// * `max` - The max number of blocks to return.
-	///   Note this is overriden with BLOCK_TRANSFER_LIMIT if BLOCK_TRANSFER_LIMIT is exceeded
+	///   Note this is overridden with BLOCK_TRANSFER_LIMIT if BLOCK_TRANSFER_LIMIT is exceeded.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * A [`BlockListing`](types/struct.BlockListing.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A [`BlockListing`](../types/struct.BlockListing.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_blocks(
 		&self,
 		start_height: u64,
@@ -167,10 +154,9 @@ where
 	/// Returns the node version and block header version (used by grin-wallet).
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * A [`Version`](types/struct.Version.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A [`Version`](../types/struct.Version.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_version(&self) -> Result<Version, Error> {
 		let version_handler = VersionHandler {
 			chain: self.chain.clone(),
@@ -181,10 +167,9 @@ where
 	/// Returns details about the state of the current fork tip.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * A [`Tip`](types/struct.Tip.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A [`Tip`](../types/struct.Tip.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_tip(&self) -> Result<Tip, Error> {
 		let chain_handler = ChainHandler {
 			chain: self.chain.clone(),
@@ -192,22 +177,21 @@ where
 		chain_handler.get_tip()
 	}
 
-	/// Returns a [`LocatedTxKernel`](types/struct.LocatedTxKernel.html) based on the kernel excess.
+	/// Returns a [`LocatedTxKernel`](../types/struct.LocatedTxKernel.html) based on the kernel excess.
 	/// The `min_height` and `max_height` parameters are both optional.
 	/// If not supplied, `min_height` will be set to 0 and `max_height` will be set to the head of the chain.
 	/// The method will start at the block height `max_height` and traverse the kernel MMR backwards,
 	/// until either the kernel is found or `min_height` is reached.
 	///
 	/// # Arguments
-	/// * `excess` - kernel excess to look for.
-	/// * `min_height` - minimum height to stop the lookup.
-	/// * `max_height` - maximum height to start the lookup.
+	/// * `excess` - Kernel excess to look for.
+	/// * `min_height` - Minimum height to stop the lookup.
+	/// * `max_height` - Maximum height to start the lookup.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * A [`LocatedTxKernel`](types/struct.LocatedTxKernel.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A [`LocatedTxKernel`](../types/struct.LocatedTxKernel.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_kernel(
 		&self,
 		excess: String,
@@ -220,23 +204,21 @@ where
 		kernel_handler.get_kernel_v2(excess, min_height, max_height)
 	}
 
-	/// Retrieves details about specifics outputs. Supports retrieval of multiple outputs in a single request.
-	/// Support retrieval by both commitment string and block height.
+	/// Retrieves details about specific outputs. Supports retrieval of multiple outputs in a single request.
+	/// Supports retrieval by both commitment string and block height.
 	///
 	/// # Arguments
-	/// * `commits` - a vector of unspent output commitments.
-	/// * `start_height` - start height to start the lookup.
-	/// * `end_height` - end height to stop the lookup.
-	/// * `include_proof` - whether or not to include the range proof in the response.
-	/// * `include_merkle_proof` (currently ignored) - whether or not to include the merkle proof in the response.
-	///    removed as it is not used and expensive to generate for historical blocks. See comments below to
-	///    re-enable this feature at compile-time.
+	/// * `commits` - A vector of unspent output commitments.
+	/// * `start_height` - Start height to start the lookup.
+	/// * `end_height` - End height to stop the lookup.
+	/// * `include_proof` - Whether or not to include the range proof in the response.
+	/// * `include_merkle_proof` (currently ignored) - Whether or not to include the Merkle proof in the response.
+	///   Removed as it is not used and expensive to generate for historical blocks.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * An [`OutputPrintable`](types/struct.OutputPrintable.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A vector of [`OutputPrintable`](../types/struct.OutputPrintable.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_outputs(
 		&self,
 		commits: Option<Vec<String>>,
@@ -253,23 +235,22 @@ where
 			start_height,
 			end_height,
 			include_proof,
-			Some(false), // To re-enable merkle proof generation, change to _include_merkle_proof
+			Some(false), // Merkle proof generation disabled
 		)
 	}
 
-	/// UTXO traversal. Retrieves last utxos since a `start_index` until a `max`.
+	/// UTXO traversal. Retrieves last UTXOs since a `start_index` until a `max`.
 	///
 	/// # Arguments
-	/// * `start_index` - start index in the MMR.
-	/// * `end_index` - optional index so stop in the MMR.
-	/// * `max` - max index in the MMR.
-	/// * `include_proof` - whether or not to include the range proof in the response.
+	/// * `start_index` - Start index in the MMR.
+	/// * `end_index` - Optional index to stop in the MMR.
+	/// * `max` - Max index in the MMR.
+	/// * `include_proof` - Whether or not to include the range proof in the response.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * An [`OutputListing`](types/struct.OutputListing.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * An [`OutputListing`](../types/struct.OutputListing.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_unspent_outputs(
 		&self,
 		start_index: u64,
@@ -286,14 +267,13 @@ where
 	/// Retrieves the PMMR indices based on the provided block height(s).
 	///
 	/// # Arguments
-	/// * `start_block_height` - start index in the MMR.
-	/// * `end_block_height` - optional index so stop in the MMR.
+	/// * `start_block_height` - Start index in the MMR.
+	/// * `end_block_height` - Optional index to stop in the MMR.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * An [`OutputListing`](types/struct.OutputListing.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * An [`OutputListing`](../types/struct.OutputListing.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_pmmr_indices(
 		&self,
 		start_block_height: u64,
@@ -305,13 +285,12 @@ where
 		txhashset_handler.block_height_range_to_pmmr_indices(start_block_height, end_block_height)
 	}
 
-	/// Returns the number of transaction in the transaction pool.
+	/// Returns the number of transactions in the transaction pool.
 	///
 	/// # Returns
-	/// * Result Containing:
+	/// * Result containing:
 	/// * `usize`
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_pool_size(&self) -> Result<usize, Error> {
 		let pool_handler = PoolHandler {
 			tx_pool: self.tx_pool.clone(),
@@ -319,13 +298,12 @@ where
 		pool_handler.get_pool_size()
 	}
 
-	/// Returns the number of transaction in the stem transaction pool.
+	/// Returns the number of transactions in the stem transaction pool.
 	///
 	/// # Returns
-	/// * Result Containing:
+	/// * Result containing:
 	/// * `usize`
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_stempool_size(&self) -> Result<usize, Error> {
 		let pool_handler = PoolHandler {
 			tx_pool: self.tx_pool.clone(),
@@ -337,10 +315,9 @@ where
 	/// Will not return transactions in the stempool.
 	///
 	/// # Returns
-	/// * Result Containing:
-	/// * A vector of [`PoolEntry`](types/struct.PoolEntry.html)
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * Result containing:
+	/// * A vector of [`PoolEntry`](../types/struct.PoolEntry.html)
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn get_unconfirmed_transactions(&self) -> Result<Vec<PoolEntry>, Error> {
 		let pool_handler = PoolHandler {
 			tx_pool: self.tx_pool.clone(),
@@ -351,14 +328,13 @@ where
 	/// Push new transaction to our local transaction pool.
 	///
 	/// # Arguments
-	/// * `tx` - the Grin transaction to push.
-	/// * `fluff` - boolean to bypass Dandelion relay.
+	/// * `tx` - The Grin transaction to push.
+	/// * `fluff` - Boolean to bypass Dandelion relay.
 	///
 	/// # Returns
-	/// * Result Containing:
+	/// * Result containing:
 	/// * `Ok(())` if the transaction was pushed successfully
-	/// * or [`Error`](struct.Error.html) if an error is encountered.
-	///
+	/// * or [`Error`](../rest/struct.Error.html) if an error is encountered.
 	pub fn push_transaction(&self, tx: Transaction, fluff: Option<bool>) -> Result<(), Error> {
 		let pool_handler = PoolHandler {
 			tx_pool: self.tx_pool.clone(),

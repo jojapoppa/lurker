@@ -50,10 +50,10 @@ use std::thread;
 
 /// Listener version, providing same API but listening for requests on a
 /// port and wrapping the calls
-pub fn node_apis<B, P>(
+pub fn node_apis<P, B>(
 	addr: &str,
 	chain: Arc<chain::Chain>,
-	tx_pool: Arc<RwLock<pool::TransactionPool<B, P>>>,
+	tx_pool: Arc<RwLock<pool::TransactionPool<P, B>>>,
 	peers: Arc<p2p::Peers>,
 	sync_state: Arc<chain::SyncState>,
 	api_secret: Option<String>,
@@ -190,17 +190,17 @@ impl crate::router::Handler for OwnerAPIHandlerV2 {
 }
 
 /// V2 API Handler/Wrapper for foreign functions
-pub struct ForeignAPIHandlerV2<B, P>
+pub struct ForeignAPIHandlerV2<P, B>
 where
 	B: BlockChain + Clone,
 	P: PoolAdapter,
 {
 	pub chain: Weak<Chain>,
-	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+	pub tx_pool: Weak<RwLock<pool::TransactionPool<P, B>>>,
 	pub sync_state: Weak<SyncState>,
 }
 
-impl<B, P> ForeignAPIHandlerV2<B, P>
+impl<P, B> ForeignAPIHandlerV2<P, B>
 where
 	B: BlockChain + Clone,
 	P: PoolAdapter,
@@ -208,7 +208,7 @@ where
 	/// Create a new foreign API handler for GET methods
 	pub fn new(
 		chain: Weak<Chain>,
-		tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+		tx_pool: Weak<RwLock<pool::TransactionPool<P, B>>>,
 		sync_state: Weak<SyncState>,
 	) -> Self {
 		ForeignAPIHandlerV2 {
@@ -219,7 +219,7 @@ where
 	}
 }
 
-impl<B, P> crate::router::Handler for ForeignAPIHandlerV2<B, P>
+impl<P, B> crate::router::Handler for ForeignAPIHandlerV2<P, B>
 where
 	B: BlockChain + Clone + 'static,
 	P: PoolAdapter + 'static,

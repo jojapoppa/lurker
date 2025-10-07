@@ -159,6 +159,7 @@ impl PoolToNetAdapter {
 			.borrow()
 			.upgrade()
 			.expect("Failed to upgrade the weak ref to our tx_pool.")
+			.inner()
 	}
 }
 

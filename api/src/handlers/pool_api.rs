@@ -16,7 +16,7 @@ use super::utils::w;
 use crate::core::core::hash::Hashed;
 use crate::core::core::Transaction;
 use crate::core::ser::{self, DeserializationMode, ProtocolVersion};
-use crate::pool::{self, BlockChain, PoolAdapter, PoolEntry};
+use crate::pool::{self, PoolEntry, ServerTxPool};
 use crate::rest::*;
 use crate::router::{Handler, ResponseFuture};
 use crate::types::*;
@@ -28,58 +28,45 @@ use std::sync::Weak;
 
 /// Get basic information about the transaction pool.
 /// GET /v1/pool
-pub struct PoolInfoHandler<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
-	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+pub struct PoolInfoHandler {
+	pub tx_pool: Weak<RwLock<ServerTxPool>>,
 }
 
-impl<B, P> Handler for PoolInfoHandler<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+impl Handler for PoolInfoHandler {
 	fn get(&self, _req: Request<Body>) -> ResponseFuture {
 		let pool_arc = w_fut!(&self.tx_pool);
 		let pool = pool_arc.read();
 
 		json_response(&PoolInfo {
-			pool_size: pool.total_size(),
+			pool_size: (*pool).total_size(),
 		})
 	}
 }
 
-pub struct PoolHandler<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
-	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+pub struct PoolHandler {
+	pub tx_pool: Weak<RwLock<ServerTxPool>>,
 }
 
-impl<B, P> PoolHandler<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+impl PoolHandler {
 	pub fn get_pool_size(&self) -> Result<usize, Error> {
 		let pool_arc = w(&self.tx_pool)?;
 		let pool = pool_arc.read();
-		Ok(pool.total_size())
+		Ok((*pool).total_size())
 	}
+
 	pub fn get_stempool_size(&self) -> Result<usize, Error> {
 		let pool_arc = w(&self.tx_pool)?;
 		let pool = pool_arc.read();
 		Ok(pool.stempool.size())
 	}
+
 	pub fn get_unconfirmed_transactions(&self) -> Result<Vec<PoolEntry>, Error> {
 		// will only read from txpool
 		let pool_arc = w(&self.tx_pool)?;
 		let txpool = pool_arc.read();
 		Ok(txpool.txpool.entries.clone())
 	}
+
 	pub fn push_transaction(&self, tx: Transaction, fluff: Option<bool>) -> Result<(), Error> {
 		let pool_arc = w(&self.tx_pool)?;
 		let source = pool::TxSource::PushApi;
@@ -110,14 +97,7 @@ struct TxWrapper {
 	tx_hex: String,
 }
 
-async fn update_pool<B, P>(
-	pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
-	req: Request<Body>,
-) -> Result<(), Error>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+async fn update_pool(pool: Weak<RwLock<ServerTxPool>>, req: Request<Body>) -> Result<(), Error> {
 	let pool = w(&pool)?;
 	let params = QueryParams::from(req.uri().query());
 	let fluff = params.get("fluff").is_some();
@@ -126,7 +106,7 @@ where
 	let tx_bin = util::from_hex(&wrapper.tx_hex)
 		.map_err(|e| Error::RequestError(format!("Bad request: {}", e)))?;
 
-	// All wallet api interaction explicitly uses protocol version 1 for now.
+	// All wallet API interaction explicitly uses protocol version 1 for now.
 	let version = ProtocolVersion(1);
 	let tx: Transaction =
 		ser::deserialize(&mut &tx_bin[..], version, DeserializationMode::default())
@@ -155,19 +135,11 @@ where
 
 /// Push new transaction to our local transaction pool.
 /// POST /v1/pool/push_tx
-pub struct PoolPushHandler<B, P>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
-	pub tx_pool: Weak<RwLock<pool::TransactionPool<B, P>>>,
+pub struct PoolPushHandler {
+	pub tx_pool: Weak<RwLock<ServerTxPool>>,
 }
 
-impl<B, P> Handler for PoolPushHandler<B, P>
-where
-	B: BlockChain + Clone + 'static,
-	P: PoolAdapter + 'static,
-{
+impl Handler for PoolPushHandler {
 	fn post(&self, req: Request<Body>) -> ResponseFuture {
 		let pool = self.tx_pool.clone();
 		Box::pin(async move {
