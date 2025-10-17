@@ -13,8 +13,8 @@ use crate::core::ser::ProtocolVersion;
 use crate::grin::dandelion_monitor;
 use crate::grin::seed;
 use crate::grin::sync;
-use crate::p2p::{Capabilities, Seeding, Server as P2PServer};
-use crate::pool::{self, PoolToChainAdapter, PoolToNetAdapterAlt};
+use crate::p2p::{Capabilities, Seeding, Server as P2PServer}; // Renamed Server to P2PServer
+use crate::pool;
 use crate::util::file::get_first_line;
 use crate::util::StopState;
 use grin_util::RwLock;
@@ -22,11 +22,12 @@ use std::sync::Arc;
 use std::{fs::File, io, thread};
 use tokio::sync::oneshot;
 
-pub type ServerTxPool = Arc<RwLock<pool::TransactionPool<PoolToNetAdapterAlt, PoolToChainAdapter>>>;
+pub type ServerTxPool =
+	Arc<RwLock<pool::TransactionPool<adapters::PoolToChainAdapter, adapters::PoolToNetAdapter>>>;
 
 pub struct Server {
 	pub config: ServerConfig,
-	pub p2p: Arc<P2PServer>,
+	pub p2p: Arc<P2PServer>, // Updated to P2PServer
 	pub chain: Arc<Chain>,
 	pub tx_pool: ServerTxPool,
 	pub sync_state: Arc<SyncState>,
@@ -57,14 +58,14 @@ impl Server {
 
 		let stop_state = stop_state.unwrap_or_else(|| Arc::new(StopState::new()));
 
-		let pool_adapter = Arc::new(PoolToChainAdapter::new());
-		let pool_net_adapter = Arc::new(PoolToNetAdapterAlt::new());
+		let pool_adapter = Arc::new(adapters::PoolToChainAdapter::new());
+		let pool_net_adapter = Arc::new(adapters::PoolToNetAdapter::new());
 		let tx_pool = Arc::new(RwLock::new(pool::TransactionPool::new(
 			config.pool_config.clone(),
 			pool_adapter.clone(),
 			pool_net_adapter.clone(),
 		)));
-		pool_net_adapter.set_tx_pool(pool::DandelionTxPool(Arc::new(tx_pool.clone())));
+		pool_net_adapter.set_tx_pool(adapters::DandelionTxPool(Arc::new(tx_pool.clone())));
 
 		let sync_state = Arc::new(SyncState::new());
 
@@ -89,12 +90,15 @@ impl Server {
 
 		let chain_adapter = Arc::new(adapters::ChainToPoolAndNetAdapter::new(
 			shared_chain.clone(),
-			tx_pool.clone(),
+			adapters::DandelionTxPool(Arc::new(tx_pool.clone())),
 		));
 
 		let net_adapter = Arc::new(adapters::NetToChainAdapter::new(
+			sync_state.clone(),
 			shared_chain.clone(),
-			p2p_server.peers.clone(),
+			tx_pool.clone(),
+			config.clone(),
+			init_net_hooks(&config),
 		));
 
 		let capabilities = if archive_mode {
@@ -105,15 +109,18 @@ impl Server {
 		debug!("Capabilities: {:?}", capabilities);
 
 		let p2p_server = Arc::new(P2PServer::new(
+			// Updated to P2PServer
 			&config.db_root,
 			capabilities,
 			config.p2p_config.clone(),
-			chain_adapter.clone(),
+			net_adapter.clone(),
 			genesis.hash(),
 			stop_state.clone(),
 		)?);
 
+		chain_adapter.init(p2p_server.peers.clone());
 		pool_net_adapter.init(p2p_server.peers.clone());
+		net_adapter.init(p2p_server.peers.clone());
 
 		let mut connect_thread = None;
 
@@ -191,7 +198,7 @@ impl Server {
 		info!("Starting dandelion monitor: {}", &config.api_http_addr);
 		let dandelion_thread = dandelion_monitor::monitor_transactions(
 			config.dandelion_config.clone(),
-			pool::DandelionTxPool(Arc::new(tx_pool.clone())),
+			adapters::DandelionTxPool(Arc::new(tx_pool.clone())),
 			pool_net_adapter,
 			stop_state.clone(),
 		)?;

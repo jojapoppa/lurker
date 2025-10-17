@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::utils::w;
+use crate::pool::{BlockChain};
 use crate::core::core::hash::Hashed;
 use crate::core::core::Transaction;
 use crate::core::ser::{self, DeserializationMode, ProtocolVersion};
@@ -22,14 +23,12 @@ use crate::router::{Handler, ResponseFuture};
 use crate::types::*;
 use crate::util;
 use crate::web::*;
-use grin_pool::transaction_pool::TransactionPool;
-use grin_pool::BlockChain;
 use grin_util::RwLock;
 use hyper::{Body, Request, StatusCode};
 use std::sync::Weak;
 
-// Get basic information about the transaction pool.
-// GET /v1/pool
+/// Get basic information about the transaction pool.
+/// GET /v1/pool
 pub struct PoolInfoHandler {
 	pub tx_pool: Weak<RwLock<ServerTxPool>>,
 }
@@ -63,6 +62,7 @@ impl PoolHandler {
 	}
 
 	pub fn get_unconfirmed_transactions(&self) -> Result<Vec<PoolEntry>, Error> {
+		// will only read from txpool
 		let pool_arc = w(&self.tx_pool)?;
 		let txpool = pool_arc.read();
 		Ok(txpool.txpool.entries.clone())
@@ -92,7 +92,7 @@ impl PoolHandler {
 	}
 }
 
-// Dummy wrapper for the hex-encoded serialized transaction.
+/// Dummy wrapper for the hex-encoded serialized transaction.
 #[derive(Serialize, Deserialize)]
 struct TxWrapper {
 	tx_hex: String,
@@ -134,8 +134,8 @@ async fn update_pool(pool: Weak<RwLock<ServerTxPool>>, req: Request<Body>) -> Re
 	Ok(())
 }
 
-// Push new transaction to our local transaction pool.
-// POST /v1/pool/push_tx
+/// Push new transaction to our local transaction pool.
+/// POST /v1/pool/push_tx
 pub struct PoolPushHandler {
 	pub tx_pool: Weak<RwLock<ServerTxPool>>,
 }

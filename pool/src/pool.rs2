@@ -15,7 +15,6 @@
 //! Transaction pool implementation.
 //! Used for both the txpool and stempool layers in the pool.
 
-use crate::transaction_pool::TransactionPool;
 use crate::types::{BlockChain, PoolAdapter, PoolConfig, PoolEntry, PoolError, TxSource};
 use chrono::prelude::*;
 use grin_chain::Chain;
@@ -248,7 +247,134 @@ impl<T: DandelionAdapter> DandelionAdapter for Arc<T> {
 	}
 }
 
-pub type ServerTxPool = TransactionPool<PoolToNetAdapterAlt, PoolToChainAdapter>;
+pub struct TransactionPool<A: PoolAdapter, B: BlockChain> {
+	pub config: PoolConfig,
+	pub txpool: Pool<B>,
+	pub stempool: Pool<B>,
+	pub adapter: Arc<A>,
+	pub blockchain: Arc<B>,
+}
+
+impl<A: PoolAdapter, B: BlockChain> TransactionPool<A, B> {
+	pub fn new(config: PoolConfig, adapter: Arc<A>, blockchain: Arc<B>) -> Self {
+		TransactionPool {
+			config,
+			txpool: Pool::new(blockchain.clone(), "txpool".to_string()),
+			stempool: Pool::new(blockchain.clone(), "stempool".to_string()),
+			adapter,
+			blockchain,
+		}
+	}
+
+	pub fn chain_head(&self) -> Result<BlockHeader, PoolError> {
+		self.blockchain.chain_head()
+	}
+
+	pub fn add_to_pool(
+		&mut self,
+		src: TxSource,
+		tx: Transaction,
+		stem: bool,
+		header: &BlockHeader,
+	) -> Result<(), PoolError> {
+		let entry = PoolEntry {
+			src,
+			tx,
+			tx_at: Utc::now(),
+		};
+		let extra_tx = if stem {
+			Some(
+				self.txpool
+					.all_transactions_aggregate(None)?
+					.unwrap_or(Transaction::empty()),
+			)
+		} else {
+			None
+		};
+		self.apply_tx_to_block_sums(&entry.tx, header)?;
+		let pool = if stem {
+			&mut self.stempool
+		} else {
+			&mut self.txpool
+		};
+		pool.add_to_pool(entry.clone(), extra_tx, header, self.config.min_fee_rate)?;
+		self.adapter.tx_accepted(&entry);
+		Ok(())
+	}
+
+	pub fn all_transactions_aggregate(
+		&self,
+		extra_tx: Option<Transaction>,
+	) -> Result<Option<Transaction>, PoolError> {
+		self.txpool.all_transactions_aggregate(extra_tx)
+	}
+
+	pub fn validate_raw_txs(
+		&self,
+		txs: &[Transaction],
+		extra_tx: Option<Transaction>,
+		header: &BlockHeader,
+		weighting: Weighting,
+	) -> Result<Vec<Transaction>, PoolError> {
+		let mut valid_txs = vec![];
+		for tx in txs {
+			let mut candidate_txs = vec![];
+			if let Some(extra_tx) = extra_tx.clone() {
+				candidate_txs.push(extra_tx);
+			}
+			candidate_txs.extend(valid_txs.clone());
+			candidate_txs.push(tx.clone());
+			let agg_tx = transaction::aggregate(&candidate_txs)?;
+			self.apply_tx_to_block_sums(&agg_tx, header)?;
+			if self
+				.txpool
+				.validate_raw_tx(&agg_tx, header, weighting, self.config.min_fee_rate)
+				.is_ok()
+			{
+				valid_txs.push(tx.clone());
+			}
+		}
+		Ok(valid_txs)
+	}
+
+	fn apply_tx_to_block_sums(
+		&self,
+		tx: &Transaction,
+		header: &BlockHeader,
+	) -> Result<BlockSums, PoolError> {
+		let overage = tx.overage();
+		let offset = {
+			let secp = static_secp_instance();
+			let secp = secp.lock();
+			header.total_kernel_offset().add(&tx.offset, &secp)
+		}?;
+		let block_sums = self.blockchain.get_block_sums(&header.hash())?;
+		let (utxo_sum, kernel_sum) =
+			(block_sums, tx as &dyn Committed).verify_kernel_sums(overage, offset)?;
+		Ok(BlockSums {
+			utxo_sum,
+			kernel_sum,
+		})
+	}
+
+	pub fn tx_kernel_received(
+		&self,
+		kernel_hash: Hash,
+		_peer_info: &PeerInfo,
+	) -> Option<Transaction> {
+		if let Some(tx) = self.txpool.retrieve_tx_by_kernel_hash(kernel_hash) {
+			return Some(tx);
+		}
+		self.stempool.retrieve_tx_by_kernel_hash(kernel_hash)
+	}
+
+	pub fn prepare_mineable_transactions(&self) -> Result<Vec<Transaction>, PoolError> {
+		self.txpool.prepare_mineable_transactions(
+			self.config.mineable_max_weight,
+			self.config.min_fee_rate,
+		)
+	}
+}
 
 pub struct Pool<B>
 where
@@ -598,3 +724,5 @@ impl Bucket {
 		})
 	}
 }
+
+pub type ServerTxPool = TransactionPool<PoolToNetAdapterAlt, PoolToChainAdapter>;

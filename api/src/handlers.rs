@@ -31,8 +31,7 @@ use crate::foreign_rpc::ForeignRpc;
 use crate::owner::Owner;
 use crate::owner_rpc::OwnerRpc;
 use crate::p2p;
-use crate::pool;
-use crate::pool::{BlockChain, PoolAdapter};
+use crate::pool::{self, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool};
 use crate::rest::{ApiServer, Error, TLSConfig};
 use crate::router::ResponseFuture;
 use crate::router::Router;
@@ -50,10 +49,10 @@ use std::thread;
 
 /// Listener version, providing same API but listening for requests on a
 /// port and wrapping the calls
-pub fn node_apis<P, B>(
+pub fn node_apis(
 	addr: &str,
 	chain: Arc<chain::Chain>,
-	tx_pool: Arc<RwLock<pool::TransactionPool<P, B>>>,
+	tx_pool: Arc<RwLock<ServerTxPool>>,
 	peers: Arc<p2p::Peers>,
 	sync_state: Arc<chain::SyncState>,
 	api_secret: Option<String>,
@@ -61,11 +60,7 @@ pub fn node_apis<P, B>(
 	tls_config: Option<TLSConfig>,
 	api_chan: &'static mut (oneshot::Sender<()>, oneshot::Receiver<()>),
 	stop_state: Arc<StopState>,
-) -> Result<(), Error>
-where
-	B: BlockChain + Clone + 'static,
-	P: PoolAdapter + 'static,
-{
+) -> Result<(), Error> {
 	let mut router = Router::new();
 
 	// Add basic auth to v2 owner API
@@ -190,25 +185,17 @@ impl crate::router::Handler for OwnerAPIHandlerV2 {
 }
 
 /// V2 API Handler/Wrapper for foreign functions
-pub struct ForeignAPIHandlerV2<P, B>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+pub struct ForeignAPIHandlerV2 {
 	pub chain: Weak<Chain>,
-	pub tx_pool: Weak<RwLock<pool::TransactionPool<P, B>>>,
+	pub tx_pool: Weak<RwLock<ServerTxPool>>,
 	pub sync_state: Weak<SyncState>,
 }
 
-impl<P, B> ForeignAPIHandlerV2<P, B>
-where
-	B: BlockChain + Clone,
-	P: PoolAdapter,
-{
+impl ForeignAPIHandlerV2 {
 	/// Create a new foreign API handler for GET methods
 	pub fn new(
 		chain: Weak<Chain>,
-		tx_pool: Weak<RwLock<pool::TransactionPool<P, B>>>,
+		tx_pool: Weak<RwLock<ServerTxPool>>,
 		sync_state: Weak<SyncState>,
 	) -> Self {
 		ForeignAPIHandlerV2 {
@@ -219,11 +206,7 @@ where
 	}
 }
 
-impl<P, B> crate::router::Handler for ForeignAPIHandlerV2<P, B>
-where
-	B: BlockChain + Clone + 'static,
-	P: PoolAdapter + 'static,
-{
+impl crate::router::Handler for ForeignAPIHandlerV2 {
 	fn post(&self, req: Request<Body>) -> ResponseFuture {
 		let api = Foreign::new(
 			self.chain.clone(),

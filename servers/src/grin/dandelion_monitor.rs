@@ -20,8 +20,11 @@ use std::time::{Duration, Instant};
 
 use crate::core::core::hash::Hashed;
 use crate::core::core::transaction;
+use crate::pool::types::DandelionConfig;
 use crate::util::{RwLock, StopState};
-use grin_pool::{DandelionAdapter, DandelionTxPool, Pool, PoolEntry, PoolError, TxSource};
+use grin_pool::pool::{
+	BlockChain, DandelionAdapter, DandelionTxPool, PoolEntry, PoolError, TxSource,
+};
 
 /// A process to monitor transactions in the stempool.
 /// With Dandelion, transactions can be broadcasted in stem or fluff phase.
@@ -128,6 +131,7 @@ fn process_fluff_phase(
 			txpool_tx,
 			&header,
 			transaction::Weighting::NoLimit,
+			dandelion_config.min_fee_rate,
 		)?
 	};
 

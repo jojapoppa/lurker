@@ -16,12 +16,19 @@
 
 use crate::chain::types::NoopAdapter;
 use crate::core::core::hash::Hash;
-use crate::core::core::{Block, BlockHeader, Transaction};
+use crate::core::core::{
+	Block, BlockHeader, CompactBlock, OutputIdentifier, Transaction, TxKernel,
+};
 use crate::p2p::{self, PeerInfo, Peers};
+use crate::pool::types::DandelionConfig;
 use crate::pool::{BlockChain, PoolAdapter, PoolEntry, PoolError};
 use grin_pool::{DandelionAdapter, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool};
+
+use crate::util::secp::pedersen::{Commitment, RangeProof};
+use chrono::prelude::{DateTime, Utc};
 use grin_util::RwLock;
 use rand::seq::IteratorRandom;
+use std::fs::File;
 use std::sync::Arc;
 use std::thread;
 
@@ -38,18 +45,25 @@ impl ChainToPoolAndNetAdapter {
 }
 
 impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
-	fn block_accepted(&self, block: &Block, status: p2p::BlockStatus, opts: p2p::Options) {
+	fn block_received(
+		&self,
+		block: &Block,
+		peer_info: &PeerInfo,
+		opts: grin_chain::Options,
+	) -> Result<bool, p2p::Error> {
 		let mut pool = self.pool.write();
 		if let Err(e) = pool.reconcile_block(block) {
 			warn!("Pool failed to reconcile block: {:?}", e);
+			return Ok(false);
 		}
 		// Additional logic for block acceptance
+		Ok(true)
 	}
 
-	fn check_txhashset(&self, header: &BlockHeader) -> bool {
-		// Placeholder for txhashset validation
-		true
-	}
+	//fn check_txhashset(&self, header: &BlockHeader) -> bool {
+	//    // Placeholder for txhashset validation
+	//    true
+	//}
 
 	fn get_transaction(&self, kernel_hash: Hash) -> Option<Transaction> {
 		let pool = self.pool.read();
@@ -61,7 +75,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		pool.tx_kernel_received(&kernel_hash, peer_info).is_some()
 	}
 
-	fn transaction_received(&self, tx: Transaction, stem: bool) -> bool {
+	fn transaction_received(&self, tx: Transaction, stem: bool, peer_info: &PeerInfo) -> bool {
 		let header = match self.chain.head_header() {
 			Ok(header) => header,
 			Err(e) => {
@@ -75,7 +89,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		pool.add_to_pool(source, tx, stem, &header).is_ok()
 	}
 
-	fn compact_block_received(&self, cb: p2p::types::CompactBlock, peer_info: &PeerInfo) -> bool {
+	fn compact_block_received(&self, cb: CompactBlock, peer_info: &PeerInfo) -> bool {
 		let header = match self.chain.head_header() {
 			Ok(header) => header,
 			Err(e) => {
@@ -92,18 +106,161 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		// Placeholder for compact block handling
 		true
 	}
-}
 
-impl p2p::ChainValidationAdapter for ChainToPoolAndNetAdapter {
-	fn reset_validation(&self) {
-		// Placeholder for validation reset
+	fn header_received(&self, bh: BlockHeader, peer_info: &PeerInfo) -> Result<bool, p2p::Error> {
+		// Placeholder for header handling
+		Ok(true)
 	}
 
-	fn check_block_validation(&self, block: &Block, peer: &PeerInfo) -> bool {
-		// Placeholder for block validation
-		true
+	fn headers_received(
+		&self,
+		bh: &[BlockHeader],
+		peer_info: &PeerInfo,
+	) -> Result<bool, p2p::Error> {
+		// Placeholder for headers handling
+		Ok(true)
+	}
+
+	fn locate_headers(&self, locator: &[Hash]) -> Result<Vec<BlockHeader>, p2p::Error> {
+		// Placeholder for header location
+		Ok(vec![])
+	}
+
+	fn get_block(&self, h: Hash, peer_info: &PeerInfo) -> Option<Block> {
+		// Placeholder for block retrieval
+		None
+	}
+
+	fn txhashset_read(&self, h: Hash) -> Option<p2p::types::TxHashSetRead> {
+		// Placeholder for txhashset read
+		None
+	}
+
+	fn txhashset_archive_header(&self) -> Result<BlockHeader, p2p::Error> {
+		// Placeholder for txhashset archive header
+		Err(p2p::Error::Internal)
+	}
+
+	fn txhashset_receive_ready(&self) -> bool {
+		// Placeholder for txhashset readiness
+		false
+	}
+
+	fn txhashset_download_update(
+		&self,
+		start_time: DateTime<Utc>,
+		downloaded_size: u64,
+		total_size: u64,
+	) -> bool {
+		// Placeholder for txhashset download update
+		false
+	}
+
+	fn txhashset_write(
+		&self,
+		h: Hash,
+		txhashset_data: File,
+		peer_info: &PeerInfo,
+	) -> Result<bool, p2p::Error> {
+		// Placeholder for txhashset write
+		Ok(false)
+	}
+
+	fn get_tmp_dir(&self) -> std::path::PathBuf {
+		// Placeholder for tmp dir
+		std::path::PathBuf::new()
+	}
+
+	fn get_tmpfile_pathname(&self, tmpfile_name: String) -> std::path::PathBuf {
+		// Placeholder for tmp file path
+		std::path::PathBuf::from(tmpfile_name)
+	}
+
+	fn get_kernel_segment(
+		&self,
+		hash: Hash,
+		id: p2p::types::SegmentIdentifier,
+	) -> Result<p2p::types::Segment<TxKernel>, p2p::Error> {
+		// Placeholder for kernel segment
+		Err(p2p::Error::Internal)
+	}
+
+	fn get_bitmap_segment(
+		&self,
+		hash: Hash,
+		id: p2p::types::SegmentIdentifier,
+	) -> Result<(p2p::types::Segment<p2p::types::BitmapChunk>, Hash), p2p::Error> {
+		// Placeholder for bitmap segment
+		Err(p2p::Error::Internal)
+	}
+
+	fn get_output_segment(
+		&self,
+		hash: Hash,
+		id: p2p::types::SegmentIdentifier,
+	) -> Result<(p2p::types::Segment<OutputIdentifier>, Hash), p2p::Error> {
+		// Placeholder for output segment
+		Err(p2p::Error::Internal)
+	}
+
+	fn get_rangeproof_segment(
+		&self,
+		hash: Hash,
+		id: p2p::types::Segment<RangeProof>,
+	) -> Result<bool, p2p::Error> {
+		// Placeholder for rangeproof segment reception
+		Ok(false)
+	}
+
+	fn receive_bitmap_segment(
+		&self,
+		block_hash: Hash,
+		output_root: Hash,
+		segment: p2p::types::Segment<p2p::types::BitmapChunk>,
+	) -> Result<bool, p2p::Error> {
+		// Placeholder for bitmap segment reception
+		Ok(false)
+	}
+
+	fn receive_output_segment(
+		&self,
+		block_hash: Hash,
+		bitmap_root: Hash,
+		segment: p2p::types::Segment<OutputIdentifier>,
+	) -> Result<bool, p2p::Error> {
+		// Placeholder for output segment reception
+		Ok(false)
+	}
+
+	fn receive_rangeproof_segment(
+		&self,
+		block_hash: Hash,
+		segment: p2p::types::Segment<RangeProof>,
+	) -> Result<bool, p2p::Error> {
+		// Placeholder for rangeproof segment reception
+		Ok(false)
+	}
+
+	fn receive_kernel_segment(
+		&self,
+		block_hash: Hash,
+		segment: p2p::types::Segment<TxKernel>,
+	) -> Result<bool, p2p::Error> {
+		// Placeholder for kernel segment reception
+		Ok(false)
 	}
 }
+
+//impl p2p::ChainValidationAdapter for ChainToPoolAndNetAdapter {
+//    fn reset_validation(&self) {
+//        // Placeholder for validation reset
+//    }
+//
+//    fn check_block_validation(&self, block: &Block, peer: &PeerInfo) -> bool {
+//        // Placeholder for block validation
+//        true
+//    }
+//}
 
 // Adapter for network-related operations
 pub struct NetToChainAdapter {
