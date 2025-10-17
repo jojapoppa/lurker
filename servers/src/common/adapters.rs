@@ -15,9 +15,11 @@
 //! Adapters to interface between pool, chain, and p2p layers.
 
 use crate::chain::types::NoopAdapter;
+use crate::core::consensus::Difficulty;
 use crate::core::core::hash::Hash;
 use crate::core::core::{
-	Block, BlockHeader, CompactBlock, OutputIdentifier, Transaction, TxKernel,
+	Block, BlockHeader, CompactBlock, OutputIdentifier, Segment, SegmentIdentifier, Transaction,
+	TxKernel,
 };
 use crate::p2p::{self, PeerInfo, Peers};
 use crate::pool::types::DandelionConfig;
@@ -26,6 +28,7 @@ use grin_pool::{DandelionAdapter, PoolToChainAdapter, PoolToNetAdapterAlt, Serve
 
 use crate::util::secp::pedersen::{Commitment, RangeProof};
 use chrono::prelude::{DateTime, Utc};
+use grin_chain::txhashset::BitmapChunk;
 use grin_util::RwLock;
 use rand::seq::IteratorRandom;
 use std::fs::File;
@@ -45,14 +48,22 @@ impl ChainToPoolAndNetAdapter {
 }
 
 impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
+	fn total_difficulty(&self) -> Result<Difficulty, grin_chain::Error> {
+		self.chain.head().map(|h| h.total_difficulty)
+	}
+
+	fn total_height(&self) -> Result<u64, grin_chain::Error> {
+		self.chain.head().map(|h| h.height)
+	}
+
 	fn block_received(
 		&self,
-		block: &Block,
+		block: Block,
 		peer_info: &PeerInfo,
 		opts: grin_chain::Options,
-	) -> Result<bool, p2p::Error> {
+	) -> Result<bool, grin_chain::Error> {
 		let mut pool = self.pool.write();
-		if let Err(e) = pool.reconcile_block(block) {
+		if let Err(e) = pool.reconcile_block(&block) {
 			warn!("Pool failed to reconcile block: {:?}", e);
 			return Ok(false);
 		}
@@ -70,31 +81,40 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		pool.retrieve_tx_by_kernel_hash(kernel_hash)
 	}
 
-	fn tx_kernel_received(&self, kernel_hash: Hash, peer_info: &PeerInfo) -> bool {
+	fn tx_kernel_received(
+		&self,
+		kernel_hash: Hash,
+		peer_info: &PeerInfo,
+	) -> Result<bool, grin_chain::Error> {
 		let pool = self.pool.read();
-		pool.tx_kernel_received(&kernel_hash, peer_info).is_some()
+		Ok((*pool).retrieve_tx_by_kernel_hash(kernel_hash).is_some())
 	}
 
-	fn transaction_received(&self, tx: Transaction, stem: bool, peer_info: &PeerInfo) -> bool {
+	fn transaction_received(&self, tx: Transaction, stem: bool) -> Result<bool, grin_chain::Error> {
 		let header = match self.chain.head_header() {
 			Ok(header) => header,
 			Err(e) => {
 				warn!("Failed to get chain head: {:?}", e);
-				return false;
+				return Ok(false);
 			}
 		};
 
 		let mut pool = self.pool.write();
-		let source = crate::pool::TxSource::Peer(peer_info.addr.0);
-		pool.add_to_pool(source, tx, stem, &header).is_ok()
+		let source = crate::pool::TxSource::Broadcast;
+		pool.add_to_pool(source, tx, stem, &header)
+			.map_err(|e| grin_chain::Error::Other(e.to_string()))
 	}
 
-	fn compact_block_received(&self, cb: CompactBlock, peer_info: &PeerInfo) -> bool {
+	fn compact_block_received(
+		&self,
+		cb: CompactBlock,
+		peer_info: &PeerInfo,
+	) -> Result<bool, grin_chain::Error> {
 		let header = match self.chain.head_header() {
 			Ok(header) => header,
 			Err(e) => {
 				warn!("Failed to get chain head: {:?}", e);
-				return false;
+				return Ok(false);
 			}
 		};
 
@@ -107,7 +127,11 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		true
 	}
 
-	fn header_received(&self, bh: BlockHeader, peer_info: &PeerInfo) -> Result<bool, p2p::Error> {
+	fn header_received(
+		&self,
+		bh: BlockHeader,
+		peer_info: &PeerInfo,
+	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for header handling
 		Ok(true)
 	}
@@ -116,12 +140,12 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		&self,
 		bh: &[BlockHeader],
 		peer_info: &PeerInfo,
-	) -> Result<bool, p2p::Error> {
+	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for headers handling
 		Ok(true)
 	}
 
-	fn locate_headers(&self, locator: &[Hash]) -> Result<Vec<BlockHeader>, p2p::Error> {
+	fn locate_headers(&self, locator: &[Hash]) -> Result<Vec<BlockHeader>, grin_chain::Error> {
 		// Placeholder for header location
 		Ok(vec![])
 	}
@@ -136,7 +160,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		None
 	}
 
-	fn txhashset_archive_header(&self) -> Result<BlockHeader, p2p::Error> {
+	fn txhashset_archive_header(&self) -> Result<BlockHeader, grin_chain::Error> {
 		// Placeholder for txhashset archive header
 		Err(p2p::Error::Internal)
 	}
@@ -161,7 +185,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		h: Hash,
 		txhashset_data: File,
 		peer_info: &PeerInfo,
-	) -> Result<bool, p2p::Error> {
+	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for txhashset write
 		Ok(false)
 	}
@@ -179,8 +203,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 	fn get_kernel_segment(
 		&self,
 		hash: Hash,
-		id: p2p::types::SegmentIdentifier,
-	) -> Result<p2p::types::Segment<TxKernel>, p2p::Error> {
+		id: crate::core::core::SegmentIdentifier,
+	) -> Result<Segment<TxKernel>, grin_chain::Error> {
 		// Placeholder for kernel segment
 		Err(p2p::Error::Internal)
 	}
@@ -188,8 +212,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 	fn get_bitmap_segment(
 		&self,
 		hash: Hash,
-		id: p2p::types::SegmentIdentifier,
-	) -> Result<(p2p::types::Segment<p2p::types::BitmapChunk>, Hash), p2p::Error> {
+		id: crate::core::core::SegmentIdentifier,
+	) -> Result<(Segment<BitmapChunk>, grin_core::core::hash::Hash), grin_chain::Error> {
 		// Placeholder for bitmap segment
 		Err(p2p::Error::Internal)
 	}
@@ -197,8 +221,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 	fn get_output_segment(
 		&self,
 		hash: Hash,
-		id: p2p::types::SegmentIdentifier,
-	) -> Result<(p2p::types::Segment<OutputIdentifier>, Hash), p2p::Error> {
+		id: crate::core::core::SegmentIdentifier,
+	) -> Result<(Segment<OutputIdentifier>, grin_core::core::hash::Hash), grin_chain::Error> {
 		// Placeholder for output segment
 		Err(p2p::Error::Internal)
 	}
@@ -206,8 +230,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 	fn get_rangeproof_segment(
 		&self,
 		hash: Hash,
-		id: p2p::types::Segment<RangeProof>,
-	) -> Result<bool, p2p::Error> {
+		id: SegmentIdentifier,
+	) -> Result<Segment<grin_util::secp::pedersen::RangeProof>, grin_chain::Error> {
 		// Placeholder for rangeproof segment reception
 		Ok(false)
 	}
@@ -216,8 +240,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		&self,
 		block_hash: Hash,
 		output_root: Hash,
-		segment: p2p::types::Segment<p2p::types::BitmapChunk>,
-	) -> Result<bool, p2p::Error> {
+		segment: crate::core::core::Segment<crate::chain::txhashset::BitmapChunk>,
+	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for bitmap segment reception
 		Ok(false)
 	}
@@ -226,8 +250,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		&self,
 		block_hash: Hash,
 		bitmap_root: Hash,
-		segment: p2p::types::Segment<OutputIdentifier>,
-	) -> Result<bool, p2p::Error> {
+		segment: crate::core::core::Segment<OutputIdentifier>,
+	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for output segment reception
 		Ok(false)
 	}
@@ -235,8 +259,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 	fn receive_rangeproof_segment(
 		&self,
 		block_hash: Hash,
-		segment: p2p::types::Segment<RangeProof>,
-	) -> Result<bool, p2p::Error> {
+		segment: crate::core::core::Segment<RangeProof>,
+	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for rangeproof segment reception
 		Ok(false)
 	}
@@ -244,8 +268,8 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 	fn receive_kernel_segment(
 		&self,
 		block_hash: Hash,
-		segment: p2p::types::Segment<TxKernel>,
-	) -> Result<bool, p2p::Error> {
+		segment: crate::core::core::Segment<TxKernel>,
+	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for kernel segment reception
 		Ok(false)
 	}

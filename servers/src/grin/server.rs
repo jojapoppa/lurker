@@ -92,11 +92,6 @@ impl Server {
 			tx_pool.clone(),
 		));
 
-		let net_adapter = Arc::new(adapters::NetToChainAdapter::new(
-			shared_chain.clone(),
-			p2p_server.peers.clone(),
-		));
-
 		let capabilities = if archive_mode {
 			Capabilities::default() | Capabilities::BLOCK_HIST
 		} else {
@@ -112,6 +107,11 @@ impl Server {
 			genesis.hash(),
 			stop_state.clone(),
 		)?);
+
+		let net_adapter = Arc::new(adapters::NetToChainAdapter::new(
+			shared_chain.clone(),
+			p2p_server.peers.clone(),
+		));
 
 		pool_net_adapter.init(p2p_server.peers.clone());
 

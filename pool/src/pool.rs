@@ -39,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
 use std::thread;
 
-pub trait DandelionAdapter {
+pub trait DandelionAdapter: Sync + Send {
 	fn select_dandelion_peer(&self) -> Option<PeerInfo>;
 	fn select_dandelionpp_peer(&self) -> Option<PeerInfo>;
 	fn select_output_peer(&self, input_peer: &PeerInfo, is_stem: bool) -> Option<PeerInfo>;

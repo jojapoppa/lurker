@@ -30,7 +30,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate log;
 
-mod pool;
+pub mod pool;
 pub mod transaction_pool;
 pub mod types;
 
