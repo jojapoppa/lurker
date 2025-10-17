@@ -130,7 +130,7 @@ fn process_fluff_phase(
 			txpool_tx,
 			&header,
 			transaction::Weighting::NoLimit,
-			tx_pool.inner().pool_config.min_fee_rate,
+			tx_pool.inner().config.min_fee_rate,
 		)?
 	};
 
@@ -155,7 +155,8 @@ fn process_expired_entries(
 	// Take a write lock on the txpool for the duration of this processing.
 	let mut tx_pool = tx_pool.write();
 
-	let embargo_secs = dandelion_config.embargo_secs + thread_rng().gen_range(0, 31);
+	let embargo_secs = dandelion_config.embargo_secs + thread_rng().gen_range(0..31);
+
 	let expired_entries = select_txs_cutoff(&tx_pool.inner().stempool, embargo_secs);
 
 	if expired_entries.is_empty() {

@@ -40,7 +40,9 @@ pub struct Server {
 
 impl Server {
 	fn one_grin_at_a_time(config: &ServerConfig) -> Result<File, Error> {
-		Ok(File::create(&config.db_root.join("grin.lock"))?)
+		Ok(File::create(
+			PathBuf::from(config.db_root).join("grin.lock"),
+		)?)
 	}
 
 	pub fn new(

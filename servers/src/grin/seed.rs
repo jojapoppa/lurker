@@ -202,11 +202,10 @@ fn monitor_peers(peers: Arc<p2p::Peers>, config: P2PConfig, tx: mpsc::Sender<Pee
 				}
 				// Fetch additional peers from Yggdrasil
 				if let Ok(peer_list) = endpoint.get_peers().await {
-					for peer in peer_list {
+					for peer in peer_list.iter() {
 						let addr = PeerAddr(SocketAddr::new(
 							IpAddr::V6(
-								Ipv6Addr::from_str(peer.address.as_str())
-									.unwrap_or(Ipv6Addr::UNSPECIFIED),
+								Ipv6Addr::from_str(peer.as_str()).unwrap_or(Ipv6Addr::UNSPECIFIED),
 							),
 							config.port,
 						));
@@ -389,8 +388,7 @@ pub fn default_dns_seeds() -> Box<dyn Fn() -> Vec<PeerAddr> + Send> {
 							.map(|peer| {
 								PeerAddr(SocketAddr::new(
 									IpAddr::V6(
-										Ipv6Addr::from_str(peer.address.as_str())
-											.unwrap_or(Ipv6Addr::UNSPECIFIED),
+										Ipv6Addr::from_str(&peer).unwrap_or(Ipv6Addr::UNSPECIFIED),
 									),
 									3414, // Default port; adjust as needed
 								))

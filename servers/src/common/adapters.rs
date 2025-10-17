@@ -17,6 +17,7 @@
 use crate::chain::types::NoopAdapter;
 use crate::core::consensus::Difficulty;
 use crate::core::core::hash::Hash;
+use crate::core::core::hash::Hashed;
 use crate::core::core::{
 	Block, BlockHeader, CompactBlock, OutputIdentifier, Segment, SegmentIdentifier, Transaction,
 	TxKernel,
@@ -24,13 +25,13 @@ use crate::core::core::{
 use crate::p2p::{self, PeerInfo, Peers};
 use crate::pool::types::DandelionConfig;
 use crate::pool::{BlockChain, PoolAdapter, PoolEntry, PoolError};
-use grin_pool::{DandelionAdapter, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool};
-
 use crate::util::secp::pedersen::{Commitment, RangeProof};
 use chrono::prelude::{DateTime, Utc};
 use grin_chain::txhashset::BitmapChunk;
+use grin_pool::{DandelionAdapter, PoolToChainAdapter, PoolToNetAdapterAlt, ServerTxPool};
 use grin_util::RwLock;
 use rand::seq::IteratorRandom;
+use rand::Rng;
 use std::fs::File;
 use std::sync::Arc;
 use std::thread;
@@ -101,8 +102,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 
 		let mut pool = self.pool.write();
 		let source = crate::pool::TxSource::Broadcast;
-		pool.add_to_pool(source, tx, stem, &header)
-			.map_err(|e| grin_chain::Error::Other(e.to_string()))
+		Ok(pool.add_to_pool(source, tx, stem, &header).is_ok())
 	}
 
 	fn compact_block_received(
@@ -120,11 +120,11 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 
 		let (txs, missing) = {
 			let pool = self.pool.read();
-			pool.retrieve_transactions(cb.hash(), cb.nonce, &cb.kern_ids)
+			pool.retrieve_transactions(cb.hash(), cb.nonce, cb.kern_ids())
 		};
 
 		// Placeholder for compact block handling
-		true
+		Ok(true)
 	}
 
 	fn header_received(
@@ -162,7 +162,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 
 	fn txhashset_archive_header(&self) -> Result<BlockHeader, grin_chain::Error> {
 		// Placeholder for txhashset archive header
-		Err(p2p::Error::Internal)
+		Err(grin_chain::Error::Other("placeholder".to_string()))
 	}
 
 	fn txhashset_receive_ready(&self) -> bool {
@@ -206,7 +206,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		id: crate::core::core::SegmentIdentifier,
 	) -> Result<Segment<TxKernel>, grin_chain::Error> {
 		// Placeholder for kernel segment
-		Err(p2p::Error::Internal)
+		Err(grin_chain::Error::Other("placeholder".to_string()))
 	}
 
 	fn get_bitmap_segment(
@@ -215,7 +215,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		id: crate::core::core::SegmentIdentifier,
 	) -> Result<(Segment<BitmapChunk>, grin_core::core::hash::Hash), grin_chain::Error> {
 		// Placeholder for bitmap segment
-		Err(p2p::Error::Internal)
+		Err(grin_chain::Error::Other("placeholder".to_string()))
 	}
 
 	fn get_output_segment(
@@ -224,7 +224,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		id: crate::core::core::SegmentIdentifier,
 	) -> Result<(Segment<OutputIdentifier>, grin_core::core::hash::Hash), grin_chain::Error> {
 		// Placeholder for output segment
-		Err(p2p::Error::Internal)
+		Err(grin_chain::Error::Other("placeholder".to_string()))
 	}
 
 	fn get_rangeproof_segment(
@@ -233,7 +233,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		id: SegmentIdentifier,
 	) -> Result<Segment<grin_util::secp::pedersen::RangeProof>, grin_chain::Error> {
 		// Placeholder for rangeproof segment reception
-		Ok(false)
+		Err(grin_chain::Error::Other("placeholder".to_string()))
 	}
 
 	fn receive_bitmap_segment(
@@ -243,6 +243,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		segment: crate::core::core::Segment<crate::chain::txhashset::BitmapChunk>,
 	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for bitmap segment reception
+		// REVIEW THIS!  no "placeholder" defined as above?
 		Ok(false)
 	}
 
@@ -253,6 +254,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		segment: crate::core::core::Segment<OutputIdentifier>,
 	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for output segment reception
+		// REVIEW THIS!  no "placeholder" defined as above?
 		Ok(false)
 	}
 
@@ -262,6 +264,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		segment: crate::core::core::Segment<RangeProof>,
 	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for rangeproof segment reception
+		// REVIEW THIS!  no "placeholder" defined as above?
 		Ok(false)
 	}
 
@@ -271,6 +274,7 @@ impl p2p::ChainAdapter for ChainToPoolAndNetAdapter {
 		segment: crate::core::core::Segment<TxKernel>,
 	) -> Result<bool, grin_chain::Error> {
 		// Placeholder for kernel segment reception
+		// REVIEW THIS!  no "placeholder" defined as above?
 		Ok(false)
 	}
 }
